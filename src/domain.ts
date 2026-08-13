@@ -41,6 +41,13 @@ export interface ChatProvider {
   generate(input: ChatProviderInput): Promise<ChatProviderResult>;
 }
 
+export class ChatProviderUnavailableError extends Error {
+  constructor(message = "AI provider is temporarily unavailable", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ChatProviderUnavailableError";
+  }
+}
+
 export interface ConversationExchange {
   tenantId: string;
   externalUserId: string;

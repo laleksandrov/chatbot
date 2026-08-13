@@ -32,9 +32,12 @@ const rawConfigSchema = z
       .transform((value) => value === "true"),
     LOG_LEVEL: z.string().default("info"),
     API_CLIENTS_JSON: z.string().default("[]"),
+    AI_PROVIDER: z.enum(["fake", "openai"]).default("fake"),
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_MODEL: z.string().default("gpt-5.6-terra"),
     OPENAI_VECTOR_STORE_ID: z.string().optional(),
+    OPENAI_REASONING_EFFORT: z.enum(["none", "low", "medium", "high", "xhigh", "max"]).default("low"),
+    OPENAI_FILE_SEARCH_MAX_RESULTS: z.coerce.number().int().min(1).max(50).default(10),
     DATABASE_URL: z.string().optional(),
     CONVERSATION_ENCRYPTION_KEY: z.string().optional(),
     CONVERSATION_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(180),
@@ -54,6 +57,18 @@ const rawConfigSchema = z
         message: "DATABASE_URL and persistent encrypted conversation storage are required in production",
       });
     }
+    if (value.AI_PROVIDER === "openai" && (!value.OPENAI_API_KEY || !value.OPENAI_VECTOR_STORE_ID)) {
+      context.addIssue({
+        code: "custom",
+        message: "OPENAI_API_KEY and OPENAI_VECTOR_STORE_ID are required when AI_PROVIDER=openai",
+      });
+    }
+    if (value.NODE_ENV === "production" && value.AI_PROVIDER !== "openai") {
+      context.addIssue({
+        code: "custom",
+        message: "AI_PROVIDER=openai is required in production",
+      });
+    }
   });
 
 export interface AppConfig {
@@ -63,9 +78,12 @@ export interface AppConfig {
   trustProxy: boolean;
   logLevel: string;
   apiClients: ApiClient[];
+  aiProvider: "fake" | "openai";
   openAiApiKey?: string;
   openAiModel: string;
   openAiVectorStoreId?: string;
+  openAiReasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  openAiFileSearchMaxResults: number;
   databaseUrl?: string;
   conversationEncryptionKey?: Buffer;
   conversationRetentionDays: number;
@@ -96,9 +114,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     trustProxy: raw.TRUST_PROXY,
     logLevel: raw.LOG_LEVEL,
     apiClients,
+    aiProvider: raw.AI_PROVIDER,
     ...(raw.OPENAI_API_KEY ? { openAiApiKey: raw.OPENAI_API_KEY } : {}),
     openAiModel: raw.OPENAI_MODEL,
     ...(raw.OPENAI_VECTOR_STORE_ID ? { openAiVectorStoreId: raw.OPENAI_VECTOR_STORE_ID } : {}),
+    openAiReasoningEffort: raw.OPENAI_REASONING_EFFORT,
+    openAiFileSearchMaxResults: raw.OPENAI_FILE_SEARCH_MAX_RESULTS,
     ...(raw.DATABASE_URL ? { databaseUrl: raw.DATABASE_URL } : {}),
     ...(conversationEncryptionKey ? { conversationEncryptionKey } : {}),
     conversationRetentionDays: raw.CONVERSATION_RETENTION_DAYS,

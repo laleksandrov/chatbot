@@ -4,7 +4,7 @@
 
 Проектът има за цел да предоставя един надежден асистент, който може да бъде използван от различни платформи — уебсайтове, вътрешни системи, EMS, Viber, WhatsApp, Messenger и други канали. Знанията, правилата и историята се управляват на едно място, а всяка платформа използва един и същ API.
 
-> **Статус:** Първият Fastify вертикален разрез е в реализация. Налични са health/readiness endpoints, Bearer authentication, fake chat provider, API за сурови документи и PostgreSQL схема за разговори и document metadata.
+> **Статус:** Първият Fastify вертикален разрез е в реализация. Налични са health/readiness endpoints, Bearer authentication, fake и OpenAI Responses API providers, защитен File Search retrieval, API за сурови документи и PostgreSQL схема за разговори и document metadata.
 
 ## Основни принципи
 
@@ -223,6 +223,15 @@ EMS е първият API клиент и първият tenant. Retrieval за 
 
 Частен документ никога не се добавя в глобалния scope по подразбиране. Повишаването му до глобален източник изисква отделно право `documents:global` и изрично зададено `accessLevel: "global"`.
 
+### OpenAI Responses API и проверка на доказателствата
+
+Production provider използва `gpt-5.6-terra`, Responses API, structured outputs и File Search. Заявките са с `store: false`, а retrieval филтърът разрешава само:
+
+- документи с `accessLevel=global`;
+- документи с `accessLevel=tenant` и `tenantId`, равен на удостоверения API клиент.
+
+Моделът връща `evidenceFileIds`, но приложението ги приема само ако същите file IDs присъстват в реалните `file_search_call.results`. Отговор със статус `answered`, който няма поне един проверен retrieval резултат, автоматично се променя на `insufficient_evidence`. Така моделът не може сам да измисли цитат или да посочи файл от друг tenant.
+
 ### Източници за законодателството
 
 Официалната следа за приемане, изменение и обнародване на български нормативен акт е „Държавен вестник“. Тъй като отделните броеве съдържат версии и изменения, а не непременно готов консолидиран действащ текст, ingestion процесът трябва да пази връзките към всички използвани публикации и да маркира консолидирания текст като производен документ.
@@ -315,8 +324,11 @@ PORT=3000
 TRUST_PROXY=true
 
 OPENAI_API_KEY=
+AI_PROVIDER=openai
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_VECTOR_STORE_ID=
+OPENAI_REASONING_EFFORT=low
+OPENAI_FILE_SEARCH_MAX_RESULTS=10
 
 API_CLIENTS_JSON=[]
 
@@ -350,10 +362,11 @@ MAX_DOCUMENT_BYTES=26214400
 - [ ] Rate limiting.
 - [x] Tenant isolation и контрол на достъпа до вътрешни източници в API слоя.
 - [ ] Business scope classifier със structured output.
-- [ ] OpenAI Responses API provider.
+- [x] OpenAI Responses API provider със structured output.
 - [x] Fake provider за тестове без реален API ключ.
 - [x] API за качване и проследяване на сурови документи.
-- [ ] File Search/vector store интеграция.
+- [x] Tenant-filtered File Search retrieval и проверка на evidence file IDs.
+- [ ] File Search ingestion worker и vector-store lifecycle.
 - [ ] Knowledge ingestion, versioning и оттегляне на остарели източници.
 - [ ] Цитирани източници в отговорите.
 - [x] PostgreSQL схема и криптиран adapter за съхранение на разговорите.

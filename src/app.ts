@@ -8,12 +8,13 @@ import { ZodError, z } from "zod";
 
 import { HttpError, registerAuthentication, requireRole } from "./auth.js";
 import type { AppConfig } from "./config.js";
-import type {
-  ChatProvider,
-  ConversationStore,
-  DocumentProcessor,
-  DocumentRepository,
-  RawDocumentStorage,
+import {
+  ChatProviderUnavailableError,
+  type ChatProvider,
+  type ConversationStore,
+  type DocumentProcessor,
+  type DocumentRepository,
+  type RawDocumentStorage,
 } from "./domain.js";
 import { DocumentIngestionService, documentMetadataSchema } from "./documents.js";
 
@@ -88,6 +89,16 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
           message: "Невалидна заявка.",
           requestId: request.id,
           details: error.issues,
+        },
+      });
+    }
+    if (error instanceof ChatProviderUnavailableError) {
+      request.log.error({ err: error, requestId: request.id }, "Chat provider unavailable");
+      return reply.status(503).send({
+        error: {
+          code: "AI_PROVIDER_UNAVAILABLE",
+          message: "AI услугата временно не е достъпна.",
+          requestId: request.id,
         },
       });
     }

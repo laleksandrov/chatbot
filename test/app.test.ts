@@ -8,6 +8,7 @@ import { createApp } from "../src/app.js";
 import { FakeChatProvider } from "../src/chat.js";
 import type { AppConfig } from "../src/config.js";
 import { InMemoryConversationStore } from "../src/conversations.js";
+import { ChatProviderUnavailableError, type ChatProvider } from "../src/domain.js";
 import {
   InMemoryDocumentRepository,
   LocalRawDocumentStorage,
@@ -44,7 +45,7 @@ describe("chatbot API", () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  async function buildApp() {
+  async function buildApp(chatProvider: ChatProvider = new FakeChatProvider()) {
     const config: AppConfig = {
       nodeEnv: "test",
       host: "127.0.0.1",
@@ -58,7 +59,10 @@ describe("chatbot API", () => {
           roles: ["chat", "documents:read", "documents:write", "documents:global"],
         },
       ],
+      aiProvider: "fake",
       openAiModel: "gpt-5.6-terra",
+      openAiReasoningEffort: "low",
+      openAiFileSearchMaxResults: 10,
       conversationRetentionDays: 180,
       dataDir,
       maxDocumentBytes: 1024 * 1024,
@@ -66,7 +70,7 @@ describe("chatbot API", () => {
 
     return createApp({
       config,
-      chatProvider: new FakeChatProvider(),
+      chatProvider,
       conversationStore: conversations,
       documentRepository: documents,
       rawDocumentStorage: new LocalRawDocumentStorage(dataDir),
@@ -177,6 +181,29 @@ describe("chatbot API", () => {
     });
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe("TENANT_MISMATCH");
+    await app.close();
+  });
+
+  it("maps provider failures to a stable 503 error", async () => {
+    const unavailableProvider: ChatProvider = {
+      async generate() {
+        throw new ChatProviderUnavailableError();
+      },
+    };
+    const app = await buildApp(unavailableProvider);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        channel: "ems",
+        externalUserId: "user-1",
+        message: "Въпрос",
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe("AI_PROVIDER_UNAVAILABLE");
     await app.close();
   });
 });

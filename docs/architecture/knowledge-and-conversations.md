@@ -12,6 +12,12 @@
 - Стандартният срок за разговори е 180 дни и може да се настройва по tenant.
 - Human escalation се предава към EMS. След предаването копието в EMS следва политиката на EMS.
 
+## Chat retrieval
+
+OpenAI provider изпраща заявките с `store: false`, structured output schema и File Search tool. Server-side filter комбинира `accessLevel=global` с частния scope `accessLevel=tenant AND tenantId=<authenticated tenant>`.
+
+Structured output съдържа `evidenceFileIds`. Provider-ът пресича този списък с върнатите `file_search_call.results` и изгражда публичните citations единствено от провереното сечение. `answered` без проверен източник се понижава до `insufficient_evidence`.
+
 ## Източници за нормативна информация
 
 Източниците се записват с произход, версия, период на валидност и дата на проверка.

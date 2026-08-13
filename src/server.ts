@@ -14,6 +14,7 @@ import {
   PendingDocumentProcessor,
   PostgresDocumentRepository,
 } from "./documents.js";
+import { OpenAIChatProvider } from "./openai-provider.js";
 
 const config = loadConfig();
 const pool = config.databaseUrl ? createPostgresPool(config.databaseUrl) : undefined;
@@ -27,9 +28,20 @@ const documentRepository = pool
   ? new PostgresDocumentRepository(pool)
   : new InMemoryDocumentRepository();
 
+const chatProvider =
+  config.aiProvider === "openai" && config.openAiApiKey && config.openAiVectorStoreId
+    ? new OpenAIChatProvider({
+        apiKey: config.openAiApiKey,
+        model: config.openAiModel,
+        vectorStoreId: config.openAiVectorStoreId,
+        reasoningEffort: config.openAiReasoningEffort,
+        maxResults: config.openAiFileSearchMaxResults,
+      })
+    : new FakeChatProvider();
+
 const app = await createApp({
   config,
-  chatProvider: new FakeChatProvider(),
+  chatProvider,
   conversationStore,
   documentRepository,
   rawDocumentStorage: new LocalRawDocumentStorage(resolve(config.dataDir)),
