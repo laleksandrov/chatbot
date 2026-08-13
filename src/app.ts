@@ -281,6 +281,33 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     });
   });
 
+  app.post("/v1/admin/documents/:id/retry", async (request, reply) => {
+    const auth = requireRole(request, "documents:write");
+    const { id } = documentParamsSchema.parse(request.params);
+    const document = await dependencies.documentRepository.findById(
+      auth.tenantId,
+      id,
+      auth.roles.has("documents:global"),
+    );
+    if (!document) {
+      throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Документът не е намерен.");
+    }
+    if (document.status !== "failed") {
+      throw new HttpError(409, "DOCUMENT_NOT_FAILED", "Само документ със статус failed може да бъде пуснат повторно.");
+    }
+
+    const retried = await dependencies.documentRepository.retryFailed(id);
+    if (!retried) {
+      throw new HttpError(409, "DOCUMENT_RETRY_CONFLICT", "Статусът на документа е променен. Проверете го отново.");
+    }
+    return reply.status(202).send({
+      documentId: retried.id,
+      status: retried.status,
+      attemptCount: retried.attemptCount,
+      nextAttemptAt: retried.nextAttemptAt?.toISOString() ?? null,
+    });
+  });
+
   app.addHook("onClose", async () => {
     await dependencies.documentRepository.close();
     await dependencies.conversationStore.close();

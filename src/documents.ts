@@ -120,6 +120,23 @@ export class InMemoryDocumentRepository implements DocumentWorkRepository {
     });
   }
 
+  async retryFailed(id: string): Promise<DocumentRecord | null> {
+    const document = this.documents.get(id);
+    if (!document || document.status !== "failed") return null;
+    const retried: DocumentRecord = {
+      ...document,
+      status: "accepted",
+      attemptCount: 0,
+      nextAttemptAt: new Date(),
+      leaseUntil: null,
+      updatedAt: new Date(),
+    };
+    delete retried.error;
+    delete retried.workerId;
+    this.documents.set(id, retried);
+    return retried;
+  }
+
   async claimNext(input: {
     workerId: string;
     leaseSeconds: number;
@@ -367,6 +384,23 @@ export class PostgresDocumentRepository implements DocumentWorkRepository {
       "UPDATE documents SET status = $2, error = $3, updated_at = now() WHERE id = $1",
       [id, status, error ?? null],
     );
+  }
+
+  async retryFailed(id: string): Promise<DocumentRecord | null> {
+    const result = await this.pool.query<DocumentRow>(
+      `UPDATE documents
+       SET status = 'accepted',
+           error = NULL,
+           attempt_count = 0,
+           next_attempt_at = now(),
+           lease_until = NULL,
+           worker_id = NULL,
+           updated_at = now()
+       WHERE id = $1 AND status = 'failed'
+       RETURNING *`,
+      [id],
+    );
+    return result.rows[0] ? mapDocument(result.rows[0]) : null;
   }
 
   async claimNext(input: {

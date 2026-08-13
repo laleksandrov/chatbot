@@ -212,6 +212,41 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("retries a failed document without creating a duplicate", async () => {
+    const app = await buildApp();
+    const multipart = multipartPayload(
+      {
+        tenantId: "ems",
+        title: "Retry policy",
+        category: "accounting",
+        sourceType: "internal",
+        accessLevel: "tenant",
+        jurisdiction: "BG",
+      },
+      "Retry content",
+    );
+    const upload = await app.inject({
+      method: "POST",
+      url: "/v1/admin/documents",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": multipart.contentType },
+      payload: multipart.body,
+    });
+    const documentId = upload.json().documentId as string;
+    await documents.updateStatus(documentId, "failed", "temporary error");
+
+    const retry = await app.inject({
+      method: "POST",
+      url: `/v1/admin/documents/${documentId}/retry`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+
+    expect(retry.statusCode).toBe(202);
+    expect(retry.json()).toMatchObject({ documentId, status: "accepted", attemptCount: 0 });
+    expect(documents.documents.size).toBe(1);
+    expect(documents.documents.get(documentId)).not.toHaveProperty("error");
+    await app.close();
+  });
+
   it("rejects a tenant mismatch", async () => {
     const app = await buildApp();
     const response = await app.inject({
