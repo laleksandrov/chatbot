@@ -4,7 +4,7 @@
 
 Проектът има за цел да предоставя един надежден асистент, който може да бъде използван от различни платформи — уебсайтове, вътрешни системи, EMS, Viber, WhatsApp, Messenger и други канали. Знанията, правилата и историята се управляват на едно място, а всяка платформа използва един и същ API.
 
-> **Статус:** Начална продуктова и техническа спецификация. Реализацията на първия работещ вертикален разрез предстои.
+> **Статус:** Първият Fastify вертикален разрез е в реализация. Налични са health/readiness endpoints, Bearer authentication, fake и OpenAI Responses API providers, защитен File Search retrieval, API за сурови документи и PostgreSQL схема за разговори и document metadata.
 
 ## Основни принципи
 
@@ -214,6 +214,77 @@ Content-Type: application/json
 
 Променливите факти ще се поддържат чрез retrieval, а не чрез fine-tuning. Fine-tuning може да бъде разглеждан по-късно само за устойчив стил или специализиран формат на отговорите.
 
+### Knowledge scopes и първи клиент
+
+EMS е първият API клиент и първият tenant. Retrieval за EMS комбинира два строго разграничени слоя:
+
+- `global` — проверени закони, подзаконови актове и официални институционални източници;
+- `tenant:ems` — частни документи, предоставени за използване само от EMS.
+
+Частен документ никога не се добавя в глобалния scope по подразбиране. Повишаването му до глобален източник изисква отделно право `documents:global` и изрично зададено `accessLevel: "global"`.
+
+### OpenAI Responses API и проверка на доказателствата
+
+Production provider използва `gpt-5.6-terra`, Responses API, structured outputs и File Search. Заявките са с `store: false`, а retrieval филтърът разрешава само:
+
+- документи с `accessLevel=global`;
+- документи с `accessLevel=tenant` и `tenantId`, равен на удостоверения API клиент.
+
+Моделът връща `evidenceFileIds`, но приложението ги приема само ако същите file IDs присъстват в реалните `file_search_call.results`. Отговор със статус `answered`, който няма поне един проверен retrieval резултат, автоматично се променя на `insufficient_evidence`. Така моделът не може сам да измисли цитат или да посочи файл от друг tenant.
+
+### Източници за законодателството
+
+Официалната следа за приемане, изменение и обнародване на български нормативен акт е „Държавен вестник“. Тъй като отделните броеве съдържат версии и изменения, а не непременно готов консолидиран действащ текст, ingestion процесът трябва да пази връзките към всички използвани публикации и да маркира консолидирания текст като производен документ.
+
+За първата версия се използват:
+
+- „Държавен вестник“ като авторитетна публикационна следа;
+- Народното събрание за приетите текстове и законодателната история;
+- компетентните държавни институции за официални указания и тематични нормативни материали;
+- EUR-Lex за приложимото право на Европейския съюз;
+- собствено контролирано RAG хранилище за предоставените вътрешни документи.
+
+Пълният набор от действащи закони няма да се зарежда наведнъж. Започва се с контролиран allowlist за счетоводство, данъци, труд и осигуряване, като всеки акт има отговорник, версия и дата на последна проверка.
+
+### API за сурови документи
+
+```http
+POST /v1/admin/documents
+Authorization: Bearer <document-admin-api-key>
+Content-Type: multipart/form-data
+```
+
+Заявката съдържа един файл в поле `file` и JSON metadata в поле `metadata`:
+
+```json
+{
+  "tenantId": "ems",
+  "title": "Вътрешна счетоводна процедура",
+  "category": "accounting",
+  "sourceType": "internal",
+  "accessLevel": "tenant",
+  "jurisdiction": "BG",
+  "validFrom": "2026-08-13"
+}
+```
+
+При успешен прием API връща `202 Accepted`, `documentId`, SHA-256 checksum и статус `accepted`. Състоянието се проверява чрез:
+
+```http
+GET /v1/admin/documents/{documentId}
+```
+
+Lifecycle-ът е `accepted` → `processing` → `ready` или `failed`, с автоматични повторни опити и възможност за `archived`. PostgreSQL записът на документа е и трайната задача за обработка: worker-ите вземат работа с lease и `FOR UPDATE SKIP LOCKED`, а изтекъл lease може безопасно да бъде поет след срив. OpenAI file ID се записва веднага след upload, преди vector-store обработката, за да не се създава дубликат при повторен опит.
+
+Worker-ът качва суровия файл в OpenAI Files API, прикрепя го към конфигурирания vector store с tenant и source metadata и маркира документа като `ready` едва когато OpenAI върне `completed`. Грешки от тип `server_error` и временни транспортни проблеми се повтарят с exponential backoff; невалидни и неподдържани файлове завършват като `failed` без безкрайни опити.
+
+```bash
+npm run db:migrate
+npm run worker
+```
+
+API и worker процесът трябва да използват една и съща PostgreSQL база, `OPENAI_VECTOR_STORE_ID` и `DATA_DIR`. При текущото локално raw storage решение те трябва да работят на един и същ сървър или върху общ persistent volume. Оригиналният файл е каноничният архив; извлеченият текст, chunks и OpenAI vector-store записът са възстановими производни данни.
+
 ## Сигурност
 
 - OpenAI и платформените ключове никога не се записват в Git.
@@ -262,11 +333,29 @@ PORT=3000
 TRUST_PROXY=true
 
 OPENAI_API_KEY=
-OPENAI_MODEL=
+AI_PROVIDER=openai
+OPENAI_MODEL=gpt-5.6-terra
 OPENAI_VECTOR_STORE_ID=
+OPENAI_REASONING_EFFORT=low
+OPENAI_FILE_SEARCH_MAX_RESULTS=10
+OPENAI_VECTOR_POLL_INTERVAL_MS=2000
+OPENAI_VECTOR_POLL_TIMEOUT_MS=300000
 
-CHATBOT_API_KEYS=
-CORS_ORIGINS=
+INGESTION_WORKER_POLL_MS=1000
+INGESTION_LEASE_SECONDS=300
+INGESTION_MAX_ATTEMPTS=5
+INGESTION_RETRY_BASE_MS=5000
+INGESTION_RETRY_MAX_MS=300000
+
+API_CLIENTS_JSON=[]
+
+DATABASE_URL=
+MIGRATION_DATABASE_URL=
+CONVERSATION_ENCRYPTION_KEY=
+CONVERSATION_RETENTION_DAYS=180
+
+DATA_DIR=./data
+MAX_DOCUMENT_BYTES=26214400
 ```
 
 Реалният `.env` остава само в защитената среда на сървъра.
@@ -277,25 +366,30 @@ CORS_ORIGINS=
 
 1. Forge клонира `main` от GitHub.
 2. Deploy script изпълнява `npm ci`, тестовете и production build.
-3. Supervisor поддържа Node.js процеса активен.
+3. Supervisor поддържа отделно API процеса (`npm start`) и ingestion worker-а (`npm run worker`).
 4. Nginx приема HTTPS заявките и ги препраща към `127.0.0.1:3000`.
 5. Forge проверява `/health` след deployment.
 
 Портът на Fastify няма да бъде публично достъпен. Външният трафик ще преминава единствено през Nginx и валиден TLS сертификат.
 
+Подробният production checklist за Managed PostgreSQL, Forge, secrets, двата Supervisor процеса и приемателния тест е в [`docs/deployment/digitalocean-forge.md`](docs/deployment/digitalocean-forge.md).
+
 ## Пътна карта
 
-- [ ] Основа на TypeScript/Fastify приложението.
-- [ ] Health endpoint и OpenAPI документация.
-- [ ] Bearer authentication и rate limiting.
-- [ ] Tenant isolation и контрол на достъпа до вътрешни източници.
+- [x] Основа на TypeScript/Fastify приложението.
+- [x] Health/readiness endpoints и OpenAPI документация.
+- [x] Bearer authentication.
+- [ ] Rate limiting.
+- [x] Tenant isolation и контрол на достъпа до вътрешни източници в API слоя.
 - [ ] Business scope classifier със structured output.
-- [ ] OpenAI Responses API provider.
-- [ ] Fake provider за тестове без реален API ключ.
-- [ ] File Search/vector store интеграция.
+- [x] OpenAI Responses API provider със structured output.
+- [x] Fake provider за тестове без реален API ключ.
+- [x] API за качване и проследяване на сурови документи.
+- [x] Tenant-filtered File Search retrieval и проверка на evidence file IDs.
+- [x] File Search ingestion worker и vector-store lifecycle с lease, retry и crash recovery.
 - [ ] Knowledge ingestion, versioning и оттегляне на остарели източници.
 - [ ] Цитирани източници в отговорите.
-- [ ] Постоянно съхранение на разговорите.
+- [x] PostgreSQL схема и криптиран adapter за съхранение на разговорите.
 - [ ] Human escalation workflow.
 - [ ] Структурирани логове, метрики и readiness проверка.
 - [ ] Forge deploy script, Supervisor и Nginx конфигурация.
