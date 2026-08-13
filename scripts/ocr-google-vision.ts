@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -16,6 +16,7 @@ interface Options {
   documentDate?: string;
   validFrom?: string;
   expectedPages?: number;
+  allowedBlankPages: number[];
 }
 
 interface PageResult {
@@ -46,6 +47,10 @@ function parseOptions(): Options {
   const sourceUrl = argument("source-url");
   const documentDate = argument("document-date");
   const validFrom = argument("valid-from");
+  const allowedBlankPages = (argument("allow-blank-pages") ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number);
   return {
     input: resolve(requireArgument("input")),
     outputDir: resolve(requireArgument("output-dir")),
@@ -54,6 +59,7 @@ function parseOptions(): Options {
     ...(documentDate ? { documentDate } : {}),
     ...(validFrom ? { validFrom } : {}),
     ...(expectedPages ? { expectedPages: Number(expectedPages) } : {}),
+    allowedBlankPages,
   };
 }
 
@@ -110,11 +116,17 @@ async function main(): Promise<void> {
     (await execFileAsync("pdfinfo", [options.input])).stdout.match(/^Pages:\s+(\d+)/m)?.[1],
   );
   if (!Number.isInteger(pageCount) || pageCount < 1) throw new Error("Could not determine PDF page count");
+  const pageImages = (await readdir(workDir))
+    .filter((filename) => /^page-\d+\.jpg$/i.test(filename))
+    .sort((left, right) => Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]));
+  if (pageImages.length !== pageCount) {
+    throw new Error(`Rendered ${pageImages.length} page images, expected ${pageCount}`);
+  }
 
   const client = new vision.ImageAnnotatorClient();
   const pages: PageResult[] = [];
   for (let page = 1; page <= pageCount; page += 1) {
-    const imagePath = join(workDir, `page-${String(page).padStart(2, "0")}.jpg`);
+    const imagePath = join(workDir, pageImages[page - 1] as string);
     const image = await readFile(imagePath);
     const [response] = await client.documentTextDetection({
       image: { content: image },
@@ -144,6 +156,7 @@ async function main(): Promise<void> {
   }
 
   const emptyPages = pages.filter((page) => page.characters < 20).map((page) => page.page);
+  const unexpectedEmptyPages = emptyPages.filter((page) => !options.allowedBlankPages.includes(page));
   const qa = {
     input: options.input,
     inputSha256,
@@ -152,7 +165,9 @@ async function main(): Promise<void> {
     totalCharacters: pages.reduce((sum, page) => sum + page.characters, 0),
     totalWords: pages.reduce((sum, page) => sum + page.words, 0),
     emptyPages,
-    passed: emptyPages.length === 0 && (options.expectedPages === undefined || pageCount === options.expectedPages),
+    allowedBlankPages: options.allowedBlankPages,
+    unexpectedEmptyPages,
+    passed: unexpectedEmptyPages.length === 0 && (options.expectedPages === undefined || pageCount === options.expectedPages),
     pages: pages.map((page) => ({
       page: page.page,
       characters: page.characters,
@@ -165,7 +180,7 @@ async function main(): Promise<void> {
   const stem = basename(options.input).replace(/\.pdf$/i, "");
   await writeFile(join(options.outputDir, `${stem}.ocr.md`), markdown(options, inputSha256, pages));
   await writeFile(join(options.outputDir, `${stem}.qa.json`), JSON.stringify(qa, null, 2));
-  if (!qa.passed) throw new Error(`OCR QA failed; empty pages: ${emptyPages.join(", ") || "none"}`);
+  if (!qa.passed) throw new Error(`OCR QA failed; unexpected empty pages: ${unexpectedEmptyPages.join(", ") || "none"}`);
 }
 
 await main();
