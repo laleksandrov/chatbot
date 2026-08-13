@@ -1,0 +1,37 @@
+{
+  "name": "bulgarian-business-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "db:migrate": "tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/swagger": "^9.8.1",
+    "@fastify/swagger-ui": "^6.1.1",
+    "fastify": "^5.11.3",
+    "pg": "^8.23.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.21.0",
+    "eslint": "^9.39.2",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^3.2.7"
+  }
+}

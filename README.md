@@ -4,7 +4,7 @@
 
 Проектът има за цел да предоставя един надежден асистент, който може да бъде използван от различни платформи — уебсайтове, вътрешни системи, EMS, Viber, WhatsApp, Messenger и други канали. Знанията, правилата и историята се управляват на едно място, а всяка платформа използва един и същ API.
 
-> **Статус:** Начална продуктова и техническа спецификация. Реализацията на първия работещ вертикален разрез предстои.
+> **Статус:** Първият Fastify вертикален разрез е в реализация. Налични са health/readiness endpoints, Bearer authentication, fake chat provider, API за сурови документи и PostgreSQL схема за разговори и document metadata.
 
 ## Основни принципи
 
@@ -214,6 +214,59 @@ Content-Type: application/json
 
 Променливите факти ще се поддържат чрез retrieval, а не чрез fine-tuning. Fine-tuning може да бъде разглеждан по-късно само за устойчив стил или специализиран формат на отговорите.
 
+### Knowledge scopes и първи клиент
+
+EMS е първият API клиент и първият tenant. Retrieval за EMS комбинира два строго разграничени слоя:
+
+- `global` — проверени закони, подзаконови актове и официални институционални източници;
+- `tenant:ems` — частни документи, предоставени за използване само от EMS.
+
+Частен документ никога не се добавя в глобалния scope по подразбиране. Повишаването му до глобален източник изисква отделно право `documents:global` и изрично зададено `accessLevel: "global"`.
+
+### Източници за законодателството
+
+Официалната следа за приемане, изменение и обнародване на български нормативен акт е „Държавен вестник“. Тъй като отделните броеве съдържат версии и изменения, а не непременно готов консолидиран действащ текст, ingestion процесът трябва да пази връзките към всички използвани публикации и да маркира консолидирания текст като производен документ.
+
+За първата версия се използват:
+
+- „Държавен вестник“ като авторитетна публикационна следа;
+- Народното събрание за приетите текстове и законодателната история;
+- компетентните държавни институции за официални указания и тематични нормативни материали;
+- EUR-Lex за приложимото право на Европейския съюз;
+- собствено контролирано RAG хранилище за предоставените вътрешни документи.
+
+Пълният набор от действащи закони няма да се зарежда наведнъж. Започва се с контролиран allowlist за счетоводство, данъци, труд и осигуряване, като всеки акт има отговорник, версия и дата на последна проверка.
+
+### API за сурови документи
+
+```http
+POST /v1/admin/documents
+Authorization: Bearer <document-admin-api-key>
+Content-Type: multipart/form-data
+```
+
+Заявката съдържа един файл в поле `file` и JSON metadata в поле `metadata`:
+
+```json
+{
+  "tenantId": "ems",
+  "title": "Вътрешна счетоводна процедура",
+  "category": "accounting",
+  "sourceType": "internal",
+  "accessLevel": "tenant",
+  "jurisdiction": "BG",
+  "validFrom": "2026-08-13"
+}
+```
+
+При успешен прием API връща `202 Accepted`, `documentId`, SHA-256 checksum и статус `accepted`. Състоянието се проверява чрез:
+
+```http
+GET /v1/admin/documents/{documentId}
+```
+
+Планираният lifecycle е `accepted` → `processing` → `ready` или `failed`, с възможност за повторна обработка и `archived`. Оригиналният файл е каноничният архив; извлеченият текст, chunks и OpenAI vector-store записът са възстановими производни данни.
+
 ## Сигурност
 
 - OpenAI и платформените ключове никога не се записват в Git.
@@ -262,11 +315,17 @@ PORT=3000
 TRUST_PROXY=true
 
 OPENAI_API_KEY=
-OPENAI_MODEL=
+OPENAI_MODEL=gpt-5.6-terra
 OPENAI_VECTOR_STORE_ID=
 
-CHATBOT_API_KEYS=
-CORS_ORIGINS=
+API_CLIENTS_JSON=[]
+
+DATABASE_URL=
+CONVERSATION_ENCRYPTION_KEY=
+CONVERSATION_RETENTION_DAYS=180
+
+DATA_DIR=./data
+MAX_DOCUMENT_BYTES=26214400
 ```
 
 Реалният `.env` остава само в защитената среда на сървъра.
@@ -285,17 +344,19 @@ CORS_ORIGINS=
 
 ## Пътна карта
 
-- [ ] Основа на TypeScript/Fastify приложението.
-- [ ] Health endpoint и OpenAPI документация.
-- [ ] Bearer authentication и rate limiting.
-- [ ] Tenant isolation и контрол на достъпа до вътрешни източници.
+- [x] Основа на TypeScript/Fastify приложението.
+- [x] Health/readiness endpoints и OpenAPI документация.
+- [x] Bearer authentication.
+- [ ] Rate limiting.
+- [x] Tenant isolation и контрол на достъпа до вътрешни източници в API слоя.
 - [ ] Business scope classifier със structured output.
 - [ ] OpenAI Responses API provider.
-- [ ] Fake provider за тестове без реален API ключ.
+- [x] Fake provider за тестове без реален API ключ.
+- [x] API за качване и проследяване на сурови документи.
 - [ ] File Search/vector store интеграция.
 - [ ] Knowledge ingestion, versioning и оттегляне на остарели източници.
 - [ ] Цитирани източници в отговорите.
-- [ ] Постоянно съхранение на разговорите.
+- [x] PostgreSQL схема и криптиран adapter за съхранение на разговорите.
 - [ ] Human escalation workflow.
 - [ ] Структурирани логове, метрики и readiness проверка.
 - [ ] Forge deploy script, Supervisor и Nginx конфигурация.
