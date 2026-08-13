@@ -24,6 +24,11 @@ interface OpenAIIndexerOptions {
   now?: () => Date;
 }
 
+function attributeString(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 function attributesFor(document: DocumentRecord): Record<string, string> {
   return Object.fromEntries(
     Object.entries({
@@ -42,8 +47,8 @@ function attributesFor(document: DocumentRecord): Record<string, string> {
       retrievedAt: document.createdAt.toISOString(),
       sha256: document.sha256,
     })
-      .filter((entry): entry is [string, string] => entry[1] !== undefined)
-      .map(([key, value]) => [key, value.slice(0, 512)]),
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, attributeString(value).slice(0, 512)]),
   );
 }
 

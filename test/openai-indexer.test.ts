@@ -114,6 +114,38 @@ describe("OpenAIDocumentIndexer", () => {
     expect(createFile).not.toHaveBeenCalled();
   });
 
+  it("serializes date objects returned by PostgreSQL as vector-store attributes", async () => {
+    const retrieve = vi.fn().mockRejectedValueOnce({ status: 404 });
+    const attach = vi.fn().mockResolvedValue(vectorFile("completed"));
+    const client = {
+      files: { create: vi.fn().mockResolvedValue({ id: "file_1" }) },
+      vectorStores: { files: { retrieve, create: attach } },
+    } as unknown as OpenAI;
+    const indexer = new OpenAIDocumentIndexer({
+      apiKey: "test-key",
+      vectorStoreId: "vs_1",
+      pollIntervalMs: 100,
+      pollTimeoutMs: 1_000,
+      client,
+    });
+
+    await indexer.index({
+      document: document({
+        publishedAt: new Date("2024-01-08T00:00:00.000Z") as unknown as string,
+        validFrom: new Date("2024-01-01T00:00:00.000Z") as unknown as string,
+      }),
+      content: Buffer.from("test"),
+      onFileUploaded: vi.fn(),
+    });
+
+    expect(attach.mock.calls[0]?.[1]).toMatchObject({
+      attributes: {
+        publishedAt: "2024-01-08T00:00:00.000Z",
+        validFrom: "2024-01-01T00:00:00.000Z",
+      },
+    });
+  });
+
   it("classifies an invalid vector-store file as a permanent failure", async () => {
     const failed = vectorFile("failed", { code: "invalid_file", message: "invalid content" });
     const client = {

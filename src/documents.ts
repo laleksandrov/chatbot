@@ -242,9 +242,9 @@ interface DocumentRow {
   jurisdiction: string;
   publisher: string | null;
   source_url: string | null;
-  published_at: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
+  published_at: string | Date | null;
+  valid_from: string | Date | null;
+  valid_to: string | Date | null;
   original_filename: string;
   mime_type: string;
   size_bytes: string;
@@ -264,6 +264,10 @@ interface DocumentRow {
   updated_at: Date;
 }
 
+function dateOnly(value: string | Date): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+}
+
 function mapDocument(row: DocumentRow): DocumentRecord {
   return {
     id: row.id,
@@ -275,9 +279,9 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     jurisdiction: row.jurisdiction,
     ...(row.publisher ? { publisher: row.publisher } : {}),
     ...(row.source_url ? { sourceUrl: row.source_url } : {}),
-    ...(row.published_at ? { publishedAt: row.published_at } : {}),
-    ...(row.valid_from ? { validFrom: row.valid_from } : {}),
-    ...(row.valid_to ? { validTo: row.valid_to } : {}),
+    ...(row.published_at ? { publishedAt: dateOnly(row.published_at) } : {}),
+    ...(row.valid_from ? { validFrom: dateOnly(row.valid_from) } : {}),
+    ...(row.valid_to ? { validTo: dateOnly(row.valid_to) } : {}),
     originalFilename: row.original_filename,
     mimeType: row.mime_type,
     sizeBytes: Number(row.size_bytes),
