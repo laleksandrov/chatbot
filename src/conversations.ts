@@ -42,13 +42,14 @@ export class PostgresConversationStore implements ConversationStore {
     const client = await this.pool.connect();
     const userMessage = encrypt(exchange.userMessage, this.encryptionKey);
     const assistantMessage = encrypt(exchange.assistantMessage, this.encryptionKey);
+    const expiresAt = new Date(exchange.createdAt.getTime() + this.retentionDays * 24 * 60 * 60 * 1_000);
 
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO conversations (
+         `INSERT INTO conversations (
            id, tenant_id, external_user_hash, channel, created_at, updated_at, expires_at
-         ) VALUES ($1, $2, $3, $4, $5, $5, $5 + $6::int * interval '1 day')
+         ) VALUES ($1, $2, $3, $4, $5, $5, $6)
          ON CONFLICT (id) DO UPDATE
            SET updated_at = EXCLUDED.updated_at,
                expires_at = EXCLUDED.expires_at
@@ -59,7 +60,7 @@ export class PostgresConversationStore implements ConversationStore {
           pseudonymize(exchange.externalUserId, this.encryptionKey),
           exchange.channel,
           exchange.createdAt,
-          this.retentionDays,
+          expiresAt,
         ],
       );
 
