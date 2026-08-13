@@ -41,6 +41,7 @@ export interface AppDependencies {
   documentRepository: DocumentRepository;
   rawDocumentStorage: RawDocumentStorage;
   documentProcessor: DocumentProcessor;
+  readinessCheck?: () => Promise<void>;
 }
 
 export async function createApp(dependencies: AppDependencies): Promise<FastifyInstance> {
@@ -128,7 +129,15 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
 
   app.get("/health", async () => ({ status: "ok" }));
-  app.get("/ready", async () => ({ status: "ready" }));
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await dependencies.readinessCheck?.();
+      return reply.send({ status: "ready" });
+    } catch (error) {
+      app.log.error({ err: error }, "Readiness check failed");
+      return reply.status(503).send({ status: "not_ready" });
+    }
+  });
 
   app.post("/v1/chat", async (request, reply) => {
     const auth = requireRole(request, "chat");

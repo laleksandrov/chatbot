@@ -350,6 +350,7 @@ INGESTION_RETRY_MAX_MS=300000
 API_CLIENTS_JSON=[]
 
 DATABASE_URL=
+MIGRATION_DATABASE_URL=
 CONVERSATION_ENCRYPTION_KEY=
 CONVERSATION_RETENTION_DAYS=180
 
@@ -370,6 +371,8 @@ MAX_DOCUMENT_BYTES=26214400
 5. Forge проверява `/health` след deployment.
 
 Портът на Fastify няма да бъде публично достъпен. Външният трафик ще преминава единствено през Nginx и валиден TLS сертификат.
+
+Подробният production checklist за Managed PostgreSQL, Forge, secrets, двата Supervisor процеса и приемателния тест е в [`docs/deployment/digitalocean-forge.md`](docs/deployment/digitalocean-forge.md).
 
 ## Пътна карта
 

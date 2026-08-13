@@ -46,6 +46,7 @@ const app = await createApp({
   documentRepository,
   rawDocumentStorage: new LocalRawDocumentStorage(resolve(config.dataDir)),
   documentProcessor: new PendingDocumentProcessor(),
+  ...(pool ? { readinessCheck: async () => { await pool.query("SELECT 1"); } } : {}),
 });
 
 if (!pool) {

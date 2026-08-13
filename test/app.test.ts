@@ -93,6 +93,45 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("reports a failed dependency readiness check", async () => {
+    const failingApp = await createApp({
+      config: {
+        nodeEnv: "test",
+        host: "127.0.0.1",
+        port: 3000,
+        trustProxy: false,
+        logLevel: "silent",
+        apiClients: [],
+        aiProvider: "fake",
+        openAiModel: "gpt-5.6-terra",
+        openAiReasoningEffort: "low",
+        openAiFileSearchMaxResults: 10,
+        openAiVectorPollIntervalMs: 2_000,
+        openAiVectorPollTimeoutMs: 300_000,
+        ingestionWorkerPollMs: 1_000,
+        ingestionLeaseSeconds: 300,
+        ingestionMaxAttempts: 5,
+        ingestionRetryBaseMs: 5_000,
+        ingestionRetryMaxMs: 300_000,
+        conversationRetentionDays: 180,
+        dataDir,
+        maxDocumentBytes: 1024,
+      },
+      chatProvider: new FakeChatProvider(),
+      conversationStore: new InMemoryConversationStore(),
+      documentRepository: new InMemoryDocumentRepository(),
+      rawDocumentStorage: new LocalRawDocumentStorage(dataDir),
+      documentProcessor: new PendingDocumentProcessor(),
+      readinessCheck: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+    const response = await failingApp.inject({ method: "GET", url: "/ready" });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ status: "not_ready" });
+    await failingApp.close();
+  });
+
   it("rejects unauthenticated chat requests", async () => {
     const app = await buildApp();
     const response = await app.inject({
