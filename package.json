@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@google-cloud/vision": "^6.0.0",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.21.0",
     "eslint": "^9.39.2",

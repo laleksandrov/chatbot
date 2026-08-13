@@ -5,5 +5,7 @@ dist/
 !.env.example
 coverage/
 data/
+.google-credentials/
+tmp/ocr/
 *.log
 .DS_Store
