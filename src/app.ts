@@ -245,7 +245,31 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     if (!document) {
       throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Документът не е намерен.");
     }
-    return reply.send(document);
+    return reply.send({
+      id: document.id,
+      tenantId: document.tenantId,
+      title: document.title,
+      category: document.category,
+      sourceType: document.sourceType,
+      accessLevel: document.accessLevel,
+      jurisdiction: document.jurisdiction,
+      publisher: document.publisher,
+      sourceUrl: document.sourceUrl,
+      publishedAt: document.publishedAt,
+      validFrom: document.validFrom,
+      validTo: document.validTo,
+      originalFilename: document.originalFilename,
+      mimeType: document.mimeType,
+      sizeBytes: document.sizeBytes,
+      sha256: document.sha256,
+      status: document.status,
+      error: document.error,
+      attemptCount: document.attemptCount,
+      nextAttemptAt: document.nextAttemptAt?.toISOString() ?? null,
+      indexedAt: document.indexedAt?.toISOString() ?? null,
+      createdAt: document.createdAt.toISOString(),
+      updatedAt: document.updatedAt.toISOString(),
+    });
   });
 
   app.addHook("onClose", async () => {

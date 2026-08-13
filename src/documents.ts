@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve, sep } from "node:path";
 
 import type { Pool } from "pg";
@@ -9,7 +9,9 @@ import type {
   DocumentProcessor,
   DocumentRecord,
   DocumentRepository,
+  DocumentIndexResult,
   DocumentStatus,
+  DocumentWorkRepository,
   RawDocumentStorage,
   StoredRawDocument,
 } from "./domain.js";
@@ -83,9 +85,17 @@ export class LocalRawDocumentStorage implements RawDocumentStorage {
       sizeBytes: input.content.length,
     };
   }
+
+  async read(storageKey: string): Promise<Buffer> {
+    const path = resolve(this.root, storageKey);
+    if (!path.startsWith(`${this.root}${sep}`)) {
+      throw new Error("Invalid document storage path");
+    }
+    return readFile(path);
+  }
 }
 
-export class InMemoryDocumentRepository implements DocumentRepository {
+export class InMemoryDocumentRepository implements DocumentWorkRepository {
   readonly documents = new Map<string, DocumentRecord>();
 
   async save(document: DocumentRecord): Promise<void> {
@@ -108,6 +118,115 @@ export class InMemoryDocumentRepository implements DocumentRepository {
       ...(error === undefined ? {} : { error }),
       updatedAt: new Date(),
     });
+  }
+
+  async claimNext(input: {
+    workerId: string;
+    leaseSeconds: number;
+    maxAttempts: number;
+    now: Date;
+  }): Promise<DocumentRecord | null> {
+    const candidate = [...this.documents.values()]
+      .filter((document) => {
+        if (document.attemptCount >= input.maxAttempts || document.status === "archived") return false;
+        if (document.status === "processing") {
+          return document.leaseUntil !== null && document.leaseUntil <= input.now;
+        }
+        return (
+          (document.status === "accepted" || document.status === "failed") &&
+          document.nextAttemptAt !== null &&
+          document.nextAttemptAt <= input.now
+        );
+      })
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())[0];
+    if (!candidate) return null;
+
+    const claimed: DocumentRecord = {
+      ...candidate,
+      status: "processing",
+      attemptCount: candidate.attemptCount + 1,
+      nextAttemptAt: null,
+      leaseUntil: new Date(input.now.getTime() + input.leaseSeconds * 1000),
+      workerId: input.workerId,
+      updatedAt: input.now,
+    };
+    delete claimed.error;
+    this.documents.set(candidate.id, claimed);
+    return claimed;
+  }
+
+  async extendLease(input: {
+    documentId: string;
+    workerId: string;
+    leaseSeconds: number;
+    now: Date;
+  }): Promise<boolean> {
+    const document = this.documents.get(input.documentId);
+    if (!document || document.status !== "processing" || document.workerId !== input.workerId) return false;
+    this.documents.set(document.id, {
+      ...document,
+      leaseUntil: new Date(input.now.getTime() + input.leaseSeconds * 1000),
+      updatedAt: input.now,
+    });
+    return true;
+  }
+
+  async recordOpenAiFile(input: {
+    documentId: string;
+    workerId: string;
+    openAiFileId: string;
+  }): Promise<void> {
+    const document = this.requireOwnedProcessingDocument(input.documentId, input.workerId);
+    this.documents.set(document.id, { ...document, openAiFileId: input.openAiFileId, updatedAt: new Date() });
+  }
+
+  async markReady(input: {
+    documentId: string;
+    workerId: string;
+    result: DocumentIndexResult;
+  }): Promise<void> {
+    const document = this.requireOwnedProcessingDocument(input.documentId, input.workerId);
+    const ready: DocumentRecord = {
+      ...document,
+      status: "ready",
+      openAiFileId: input.result.openAiFileId,
+      vectorStoreId: input.result.vectorStoreId,
+      vectorStoreFileId: input.result.vectorStoreFileId,
+      indexedAt: input.result.indexedAt,
+      nextAttemptAt: null,
+      leaseUntil: null,
+      updatedAt: input.result.indexedAt,
+    };
+    delete ready.error;
+    delete ready.workerId;
+    this.documents.set(document.id, ready);
+  }
+
+  async markFailed(input: {
+    documentId: string;
+    workerId: string;
+    error: string;
+    nextAttemptAt: Date | null;
+  }): Promise<void> {
+    const document = this.requireOwnedProcessingDocument(input.documentId, input.workerId);
+    const failed: DocumentRecord = {
+      ...document,
+      status: "failed",
+      error: input.error,
+      nextAttemptAt: input.nextAttemptAt,
+      leaseUntil: null,
+      updatedAt: new Date(),
+    };
+    delete failed.workerId;
+    this.documents.set(document.id, failed);
+  }
+
+  private requireOwnedProcessingDocument(documentId: string, workerId: string): DocumentRecord {
+    const document = this.documents.get(documentId);
+    if (!document || document.status !== "processing" || document.workerId !== workerId) {
+      throw new Error("Document lease is not owned by this worker");
+    }
+    return document;
   }
 
   async close(): Promise<void> {}
@@ -133,6 +252,14 @@ interface DocumentRow {
   storage_key: string;
   status: DocumentStatus;
   error: string | null;
+  attempt_count: number;
+  next_attempt_at: Date | null;
+  lease_until: Date | null;
+  worker_id: string | null;
+  openai_file_id: string | null;
+  vector_store_id: string | null;
+  vector_store_file_id: string | null;
+  indexed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -158,12 +285,20 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     storageKey: row.storage_key,
     status: row.status,
     ...(row.error ? { error: row.error } : {}),
+    attemptCount: row.attempt_count,
+    nextAttemptAt: row.next_attempt_at,
+    leaseUntil: row.lease_until,
+    ...(row.worker_id ? { workerId: row.worker_id } : {}),
+    ...(row.openai_file_id ? { openAiFileId: row.openai_file_id } : {}),
+    ...(row.vector_store_id ? { vectorStoreId: row.vector_store_id } : {}),
+    ...(row.vector_store_file_id ? { vectorStoreFileId: row.vector_store_file_id } : {}),
+    indexedAt: row.indexed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export class PostgresDocumentRepository implements DocumentRepository {
+export class PostgresDocumentRepository implements DocumentWorkRepository {
   constructor(private readonly pool: Pool) {}
 
   async save(document: DocumentRecord): Promise<void> {
@@ -172,10 +307,13 @@ export class PostgresDocumentRepository implements DocumentRepository {
          id, tenant_id, title, category, source_type, access_level, jurisdiction,
          publisher, source_url, published_at, valid_from, valid_to,
          original_filename, mime_type, size_bytes, sha256, storage_key,
-         status, error, created_at, updated_at
+         status, error, attempt_count, next_attempt_at, lease_until, worker_id,
+         openai_file_id, vector_store_id, vector_store_file_id, indexed_at,
+         created_at, updated_at
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-         $13, $14, $15, $16, $17, $18, $19, $20, $21
+         $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+         $24, $25, $26, $27, $28, $29
        )`,
       [
         document.id,
@@ -197,6 +335,14 @@ export class PostgresDocumentRepository implements DocumentRepository {
         document.storageKey,
         document.status,
         document.error ?? null,
+        document.attemptCount,
+        document.nextAttemptAt,
+        document.leaseUntil,
+        document.workerId ?? null,
+        document.openAiFileId ?? null,
+        document.vectorStoreId ?? null,
+        document.vectorStoreFileId ?? null,
+        document.indexedAt,
         document.createdAt,
         document.updatedAt,
       ],
@@ -219,12 +365,129 @@ export class PostgresDocumentRepository implements DocumentRepository {
     );
   }
 
+  async claimNext(input: {
+    workerId: string;
+    leaseSeconds: number;
+    maxAttempts: number;
+    now: Date;
+  }): Promise<DocumentRecord | null> {
+    const result = await this.pool.query<DocumentRow>(
+      `WITH candidate AS (
+         SELECT id
+         FROM documents
+         WHERE attempt_count < $3
+           AND status <> 'archived'
+           AND (
+             (status IN ('accepted', 'failed') AND next_attempt_at IS NOT NULL AND next_attempt_at <= $4)
+             OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until < $4)
+           )
+         ORDER BY COALESCE(next_attempt_at, lease_until, created_at), created_at
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       UPDATE documents AS document
+       SET status = 'processing',
+           attempt_count = document.attempt_count + 1,
+           next_attempt_at = NULL,
+           lease_until = $4 + ($2::double precision * interval '1 second'),
+           worker_id = $1,
+           error = NULL,
+           updated_at = $4
+       FROM candidate
+       WHERE document.id = candidate.id
+       RETURNING document.*`,
+      [input.workerId, input.leaseSeconds, input.maxAttempts, input.now],
+    );
+    return result.rows[0] ? mapDocument(result.rows[0]) : null;
+  }
+
+  async extendLease(input: {
+    documentId: string;
+    workerId: string;
+    leaseSeconds: number;
+    now: Date;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE documents
+       SET lease_until = $4 + ($3::double precision * interval '1 second'), updated_at = $4
+       WHERE id = $1 AND worker_id = $2 AND status = 'processing'`,
+      [input.documentId, input.workerId, input.leaseSeconds, input.now],
+    );
+    return result.rowCount === 1;
+  }
+
+  async recordOpenAiFile(input: {
+    documentId: string;
+    workerId: string;
+    openAiFileId: string;
+  }): Promise<void> {
+    await this.assertUpdated(
+      `UPDATE documents
+       SET openai_file_id = $3, updated_at = now()
+       WHERE id = $1 AND worker_id = $2 AND status = 'processing'`,
+      [input.documentId, input.workerId, input.openAiFileId],
+    );
+  }
+
+  async markReady(input: {
+    documentId: string;
+    workerId: string;
+    result: DocumentIndexResult;
+  }): Promise<void> {
+    await this.assertUpdated(
+      `UPDATE documents
+       SET status = 'ready',
+           error = NULL,
+           next_attempt_at = NULL,
+           lease_until = NULL,
+           worker_id = NULL,
+           openai_file_id = $3,
+           vector_store_id = $4,
+           vector_store_file_id = $5,
+           indexed_at = $6,
+           updated_at = $6
+       WHERE id = $1 AND worker_id = $2 AND status = 'processing'`,
+      [
+        input.documentId,
+        input.workerId,
+        input.result.openAiFileId,
+        input.result.vectorStoreId,
+        input.result.vectorStoreFileId,
+        input.result.indexedAt,
+      ],
+    );
+  }
+
+  async markFailed(input: {
+    documentId: string;
+    workerId: string;
+    error: string;
+    nextAttemptAt: Date | null;
+  }): Promise<void> {
+    await this.assertUpdated(
+      `UPDATE documents
+       SET status = 'failed',
+           error = $3,
+           next_attempt_at = $4,
+           lease_until = NULL,
+           worker_id = NULL,
+           updated_at = now()
+       WHERE id = $1 AND worker_id = $2 AND status = 'processing'`,
+      [input.documentId, input.workerId, input.error, input.nextAttemptAt],
+    );
+  }
+
+  private async assertUpdated(query: string, values: unknown[]): Promise<void> {
+    const result = await this.pool.query(query, values);
+    if (result.rowCount !== 1) throw new Error("Document lease was lost before update");
+  }
+
   async close(): Promise<void> {}
 }
 
 export class PendingDocumentProcessor implements DocumentProcessor {
   async enqueue(): Promise<void> {
-    // The durable worker/OpenAI File Search adapter is the next vertical slice.
+    // The document row is already durable and immediately eligible for the polling worker.
   }
 }
 
@@ -270,6 +533,10 @@ export class DocumentIngestionService {
       sha256: stored.sha256,
       storageKey: stored.storageKey,
       status: "accepted",
+      attemptCount: 0,
+      nextAttemptAt: now,
+      leaseUntil: null,
+      indexedAt: null,
       createdAt: now,
       updatedAt: now,
     };

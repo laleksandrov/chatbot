@@ -38,6 +38,13 @@ const rawConfigSchema = z
     OPENAI_VECTOR_STORE_ID: z.string().optional(),
     OPENAI_REASONING_EFFORT: z.enum(["none", "low", "medium", "high", "xhigh", "max"]).default("low"),
     OPENAI_FILE_SEARCH_MAX_RESULTS: z.coerce.number().int().min(1).max(50).default(10),
+    OPENAI_VECTOR_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(2_000),
+    OPENAI_VECTOR_POLL_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(300_000),
+    INGESTION_WORKER_POLL_MS: z.coerce.number().int().min(100).default(1_000),
+    INGESTION_LEASE_SECONDS: z.coerce.number().int().min(10).default(300),
+    INGESTION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
+    INGESTION_RETRY_BASE_MS: z.coerce.number().int().min(100).default(5_000),
+    INGESTION_RETRY_MAX_MS: z.coerce.number().int().min(100).default(300_000),
     DATABASE_URL: z.string().optional(),
     CONVERSATION_ENCRYPTION_KEY: z.string().optional(),
     CONVERSATION_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(180),
@@ -84,6 +91,13 @@ export interface AppConfig {
   openAiVectorStoreId?: string;
   openAiReasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   openAiFileSearchMaxResults: number;
+  openAiVectorPollIntervalMs: number;
+  openAiVectorPollTimeoutMs: number;
+  ingestionWorkerPollMs: number;
+  ingestionLeaseSeconds: number;
+  ingestionMaxAttempts: number;
+  ingestionRetryBaseMs: number;
+  ingestionRetryMaxMs: number;
   databaseUrl?: string;
   conversationEncryptionKey?: Buffer;
   conversationRetentionDays: number;
@@ -120,6 +134,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     ...(raw.OPENAI_VECTOR_STORE_ID ? { openAiVectorStoreId: raw.OPENAI_VECTOR_STORE_ID } : {}),
     openAiReasoningEffort: raw.OPENAI_REASONING_EFFORT,
     openAiFileSearchMaxResults: raw.OPENAI_FILE_SEARCH_MAX_RESULTS,
+    openAiVectorPollIntervalMs: raw.OPENAI_VECTOR_POLL_INTERVAL_MS,
+    openAiVectorPollTimeoutMs: raw.OPENAI_VECTOR_POLL_TIMEOUT_MS,
+    ingestionWorkerPollMs: raw.INGESTION_WORKER_POLL_MS,
+    ingestionLeaseSeconds: raw.INGESTION_LEASE_SECONDS,
+    ingestionMaxAttempts: raw.INGESTION_MAX_ATTEMPTS,
+    ingestionRetryBaseMs: raw.INGESTION_RETRY_BASE_MS,
+    ingestionRetryMaxMs: raw.INGESTION_RETRY_MAX_MS,
     ...(raw.DATABASE_URL ? { databaseUrl: raw.DATABASE_URL } : {}),
     ...(conversationEncryptionKey ? { conversationEncryptionKey } : {}),
     conversationRetentionDays: raw.CONVERSATION_RETENTION_DAYS,

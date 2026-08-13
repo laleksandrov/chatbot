@@ -274,7 +274,16 @@ Content-Type: multipart/form-data
 GET /v1/admin/documents/{documentId}
 ```
 
-Планираният lifecycle е `accepted` → `processing` → `ready` или `failed`, с възможност за повторна обработка и `archived`. Оригиналният файл е каноничният архив; извлеченият текст, chunks и OpenAI vector-store записът са възстановими производни данни.
+Lifecycle-ът е `accepted` → `processing` → `ready` или `failed`, с автоматични повторни опити и възможност за `archived`. PostgreSQL записът на документа е и трайната задача за обработка: worker-ите вземат работа с lease и `FOR UPDATE SKIP LOCKED`, а изтекъл lease може безопасно да бъде поет след срив. OpenAI file ID се записва веднага след upload, преди vector-store обработката, за да не се създава дубликат при повторен опит.
+
+Worker-ът качва суровия файл в OpenAI Files API, прикрепя го към конфигурирания vector store с tenant и source metadata и маркира документа като `ready` едва когато OpenAI върне `completed`. Грешки от тип `server_error` и временни транспортни проблеми се повтарят с exponential backoff; невалидни и неподдържани файлове завършват като `failed` без безкрайни опити.
+
+```bash
+npm run db:migrate
+npm run worker
+```
+
+API и worker процесът трябва да използват една и съща PostgreSQL база, `OPENAI_VECTOR_STORE_ID` и `DATA_DIR`. При текущото локално raw storage решение те трябва да работят на един и същ сървър или върху общ persistent volume. Оригиналният файл е каноничният архив; извлеченият текст, chunks и OpenAI vector-store записът са възстановими производни данни.
 
 ## Сигурност
 
@@ -329,6 +338,14 @@ OPENAI_MODEL=gpt-5.6-terra
 OPENAI_VECTOR_STORE_ID=
 OPENAI_REASONING_EFFORT=low
 OPENAI_FILE_SEARCH_MAX_RESULTS=10
+OPENAI_VECTOR_POLL_INTERVAL_MS=2000
+OPENAI_VECTOR_POLL_TIMEOUT_MS=300000
+
+INGESTION_WORKER_POLL_MS=1000
+INGESTION_LEASE_SECONDS=300
+INGESTION_MAX_ATTEMPTS=5
+INGESTION_RETRY_BASE_MS=5000
+INGESTION_RETRY_MAX_MS=300000
 
 API_CLIENTS_JSON=[]
 
@@ -348,7 +365,7 @@ MAX_DOCUMENT_BYTES=26214400
 
 1. Forge клонира `main` от GitHub.
 2. Deploy script изпълнява `npm ci`, тестовете и production build.
-3. Supervisor поддържа Node.js процеса активен.
+3. Supervisor поддържа отделно API процеса (`npm start`) и ingestion worker-а (`npm run worker`).
 4. Nginx приема HTTPS заявките и ги препраща към `127.0.0.1:3000`.
 5. Forge проверява `/health` след deployment.
 
@@ -366,7 +383,7 @@ MAX_DOCUMENT_BYTES=26214400
 - [x] Fake provider за тестове без реален API ключ.
 - [x] API за качване и проследяване на сурови документи.
 - [x] Tenant-filtered File Search retrieval и проверка на evidence file IDs.
-- [ ] File Search ingestion worker и vector-store lifecycle.
+- [x] File Search ingestion worker и vector-store lifecycle с lease, retry и crash recovery.
 - [ ] Knowledge ingestion, versioning и оттегляне на остарели източници.
 - [ ] Цитирани източници в отговорите.
 - [x] PostgreSQL схема и криптиран adapter за съхранение на разговорите.

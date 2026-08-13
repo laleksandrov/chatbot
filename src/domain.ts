@@ -95,6 +95,14 @@ export interface DocumentRecord {
   storageKey: string;
   status: DocumentStatus;
   error?: string;
+  attemptCount: number;
+  nextAttemptAt: Date | null;
+  leaseUntil: Date | null;
+  workerId?: string;
+  openAiFileId?: string;
+  vectorStoreId?: string;
+  vectorStoreFileId?: string;
+  indexedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -104,6 +112,44 @@ export interface DocumentRepository {
   findById(tenantId: string, id: string, canReadGlobal: boolean): Promise<DocumentRecord | null>;
   updateStatus(id: string, status: DocumentStatus, error?: string): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface DocumentIndexResult {
+  openAiFileId: string;
+  vectorStoreId: string;
+  vectorStoreFileId: string;
+  indexedAt: Date;
+}
+
+export interface DocumentWorkRepository extends DocumentRepository {
+  claimNext(input: {
+    workerId: string;
+    leaseSeconds: number;
+    maxAttempts: number;
+    now: Date;
+  }): Promise<DocumentRecord | null>;
+  extendLease(input: {
+    documentId: string;
+    workerId: string;
+    leaseSeconds: number;
+    now: Date;
+  }): Promise<boolean>;
+  recordOpenAiFile(input: {
+    documentId: string;
+    workerId: string;
+    openAiFileId: string;
+  }): Promise<void>;
+  markReady(input: {
+    documentId: string;
+    workerId: string;
+    result: DocumentIndexResult;
+  }): Promise<void>;
+  markFailed(input: {
+    documentId: string;
+    workerId: string;
+    error: string;
+    nextAttemptAt: Date | null;
+  }): Promise<void>;
 }
 
 export interface StoredRawDocument {
@@ -119,8 +165,17 @@ export interface RawDocumentStorage {
     filename: string;
     content: Buffer;
   }): Promise<StoredRawDocument>;
+  read(storageKey: string): Promise<Buffer>;
 }
 
 export interface DocumentProcessor {
   enqueue(document: DocumentRecord): Promise<void>;
+}
+
+export interface DocumentIndexer {
+  index(input: {
+    document: DocumentRecord;
+    content: Buffer;
+    onFileUploaded(openAiFileId: string): Promise<void>;
+  }): Promise<DocumentIndexResult>;
 }
