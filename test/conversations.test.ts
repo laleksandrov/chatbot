@@ -9,7 +9,15 @@ describe("PostgresConversationStore", () => {
     const query = vi.fn()
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ rows: [{ tenant_id: "ems" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            tenant_id: "ems",
+            assistant_profile: "registered_customer",
+            external_organization_hash: null,
+          },
+        ],
+      })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({});
     const client = { query, release: vi.fn() } as unknown as PoolClient;
@@ -26,11 +34,13 @@ describe("PostgresConversationStore", () => {
       status: "answered",
       requestId: "request-1",
       createdAt,
+      assistantProfile: "registered_customer",
+      retentionDays: 30,
     });
 
     const conversationInsert = query.mock.calls[1];
-    expect(conversationInsert?.[0]).toContain("VALUES ($1, $2, $3, $4, $5, $5, $6)");
-    expect(conversationInsert?.[1]?.[4]).toEqual(createdAt);
-    expect(conversationInsert?.[1]?.[5]).toEqual(new Date("2027-02-09T10:00:00.000Z"));
+    expect(conversationInsert?.[0]).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)");
+    expect(conversationInsert?.[1]?.[6]).toEqual(createdAt);
+    expect(conversationInsert?.[1]?.[7]).toEqual(new Date("2026-09-12T10:00:00.000Z"));
   });
 });

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { assistantProfiles, type AssistantProfile } from "./profiles.js";
+
 export const apiRoles = [
   "chat",
   "documents:read",
@@ -13,13 +15,22 @@ export interface ApiClient {
   tenantId: string;
   key: string;
   roles: ApiRole[];
+  allowedProfiles: AssistantProfile[];
+  defaultProfile: AssistantProfile;
 }
 
-const apiClientSchema = z.object({
-  tenantId: z.string().min(1),
-  key: z.string().min(8),
-  roles: z.array(z.enum(apiRoles)).min(1),
-});
+const apiClientSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    key: z.string().min(8),
+    roles: z.array(z.enum(apiRoles)).min(1),
+    allowedProfiles: z.array(z.enum(assistantProfiles)).min(1).default(["accounting_client"]),
+    defaultProfile: z.enum(assistantProfiles).default("accounting_client"),
+  })
+  .refine((value) => value.allowedProfiles.includes(value.defaultProfile), {
+    message: "defaultProfile must be included in allowedProfiles",
+    path: ["defaultProfile"],
+  });
 
 const rawConfigSchema = z
   .object({

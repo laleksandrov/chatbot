@@ -42,34 +42,52 @@ export class PostgresConversationStore implements ConversationStore {
     const client = await this.pool.connect();
     const userMessage = encrypt(exchange.userMessage, this.encryptionKey);
     const assistantMessage = encrypt(exchange.assistantMessage, this.encryptionKey);
-    const expiresAt = new Date(exchange.createdAt.getTime() + this.retentionDays * 24 * 60 * 60 * 1_000);
+    const retentionDays = exchange.retentionDays || this.retentionDays;
+    const expiresAt = new Date(exchange.createdAt.getTime() + retentionDays * 24 * 60 * 60 * 1_000);
+    const externalOrganizationHash = exchange.externalOrganizationId
+      ? pseudonymize(exchange.externalOrganizationId, this.encryptionKey)
+      : null;
 
     try {
       await client.query("BEGIN");
       await client.query(
          `INSERT INTO conversations (
-           id, tenant_id, external_user_hash, channel, created_at, updated_at, expires_at
-         ) VALUES ($1, $2, $3, $4, $5, $5, $6)
+           id, tenant_id, external_user_hash, external_organization_hash,
+           assistant_profile, channel, created_at, updated_at, expires_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
          ON CONFLICT (id) DO UPDATE
            SET updated_at = EXCLUDED.updated_at,
                expires_at = EXCLUDED.expires_at
-         WHERE conversations.tenant_id = EXCLUDED.tenant_id`,
+         WHERE conversations.tenant_id = EXCLUDED.tenant_id
+           AND conversations.assistant_profile = EXCLUDED.assistant_profile
+           AND conversations.external_organization_hash IS NOT DISTINCT FROM EXCLUDED.external_organization_hash`,
         [
           exchange.conversationId,
           exchange.tenantId,
           pseudonymize(exchange.externalUserId, this.encryptionKey),
+          externalOrganizationHash,
+          exchange.assistantProfile,
           exchange.channel,
           exchange.createdAt,
           expiresAt,
         ],
       );
 
-      const ownership = await client.query<{ tenant_id: string }>(
-        "SELECT tenant_id FROM conversations WHERE id = $1",
+      const ownership = await client.query<{
+        tenant_id: string;
+        assistant_profile: string;
+        external_organization_hash: string | null;
+      }>(
+        "SELECT tenant_id, assistant_profile, external_organization_hash FROM conversations WHERE id = $1",
         [exchange.conversationId],
       );
-      if (ownership.rows[0]?.tenant_id !== exchange.tenantId) {
-        throw new Error("Conversation tenant mismatch");
+      const owner = ownership.rows[0];
+      if (
+        owner?.tenant_id !== exchange.tenantId ||
+        owner.assistant_profile !== exchange.assistantProfile ||
+        owner.external_organization_hash !== externalOrganizationHash
+      ) {
+        throw new Error("Conversation scope mismatch");
       }
 
       await client.query(
@@ -88,7 +106,11 @@ export class PostgresConversationStore implements ConversationStore {
           assistantMessage.iv,
           assistantMessage.authTag,
           exchange.createdAt,
-          JSON.stringify({ status: exchange.status, requestId: exchange.requestId }),
+          JSON.stringify({
+            status: exchange.status,
+            requestId: exchange.requestId,
+            assistantProfile: exchange.assistantProfile,
+          }),
         ],
       );
       await client.query("COMMIT");

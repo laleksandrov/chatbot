@@ -25,6 +25,8 @@ export interface ChatContext {
 
 export interface ChatProviderInput {
   tenantId: string;
+  assistantProfile: AssistantProfile;
+  externalOrganizationId?: string;
   message: string;
   context?: ChatContext;
 }
@@ -50,13 +52,16 @@ export class ChatProviderUnavailableError extends Error {
 
 export interface ConversationExchange {
   tenantId: string;
+  assistantProfile: AssistantProfile;
   externalUserId: string;
+  externalOrganizationId?: string;
   conversationId: string;
   channel: string;
   userMessage: string;
   assistantMessage: string;
   status: AnswerStatus;
   requestId: string;
+  retentionDays: number;
   createdAt: Date;
 }
 
@@ -82,6 +87,7 @@ export interface DocumentRecord {
   category: string;
   sourceType: "legislation" | "institutional" | "internal" | "professional";
   accessLevel: "global" | "tenant";
+  organizationId?: string;
   jurisdiction: string;
   publisher?: string;
   sourceUrl?: string;
@@ -180,3 +186,4 @@ export interface DocumentIndexer {
     onFileUploaded(openAiFileId: string): Promise<void>;
   }): Promise<DocumentIndexResult>;
 }
+import type { AssistantProfile } from "./profiles.js";

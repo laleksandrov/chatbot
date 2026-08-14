@@ -15,6 +15,7 @@ import {
   PostgresDocumentRepository,
 } from "./documents.js";
 import { OpenAIChatProvider } from "./openai-provider.js";
+import { InMemoryChatQuotaStore, PostgresChatQuotaStore } from "./quotas.js";
 
 const config = loadConfig();
 const pool = config.databaseUrl ? createPostgresPool(config.databaseUrl) : undefined;
@@ -27,6 +28,11 @@ const conversationStore =
 const documentRepository = pool
   ? new PostgresDocumentRepository(pool)
   : new InMemoryDocumentRepository();
+
+const chatQuotaStore =
+  pool && config.conversationEncryptionKey
+    ? new PostgresChatQuotaStore(pool, config.conversationEncryptionKey)
+    : new InMemoryChatQuotaStore();
 
 const chatProvider =
   config.aiProvider === "openai" && config.openAiApiKey && config.openAiVectorStoreId
@@ -43,6 +49,7 @@ const app = await createApp({
   config,
   chatProvider,
   conversationStore,
+  chatQuotaStore,
   documentRepository,
   rawDocumentStorage: new LocalRawDocumentStorage(resolve(config.dataDir)),
   documentProcessor: new PendingDocumentProcessor(),

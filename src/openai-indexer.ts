@@ -38,6 +38,8 @@ function attributesFor(document: DocumentRecord): Record<string, string> {
       category: document.category,
       sourceType: document.sourceType,
       accessLevel: document.accessLevel,
+      organizationId: document.organizationId,
+      documentScope: document.organizationId ? "organization" : document.accessLevel,
       jurisdiction: document.jurisdiction,
       publisher: document.publisher,
       sourceUrl: document.sourceUrl,

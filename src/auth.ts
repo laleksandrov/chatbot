@@ -3,10 +3,13 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import type { ApiClient, ApiRole } from "./config.js";
+import type { AssistantProfile } from "./profiles.js";
 
 export interface AuthContext {
   tenantId: string;
   roles: ReadonlySet<ApiRole>;
+  allowedProfiles: ReadonlySet<AssistantProfile>;
+  defaultProfile: AssistantProfile;
 }
 
 declare module "fastify" {
@@ -44,7 +47,12 @@ function authenticate(request: FastifyRequest, clients: readonly ApiClient[]): A
     throw new HttpError(401, "UNAUTHORIZED", "Невалиден API ключ.");
   }
 
-  return { tenantId: client.tenantId, roles: new Set(client.roles) };
+  return {
+    tenantId: client.tenantId,
+    roles: new Set(client.roles),
+    allowedProfiles: new Set(client.allowedProfiles),
+    defaultProfile: client.defaultProfile,
+  };
 }
 
 export function requireRole(request: FastifyRequest, role: ApiRole): AuthContext {

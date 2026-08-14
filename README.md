@@ -85,6 +85,8 @@ flowchart LR
 
 ## Планиран API договор
 
+Практическото ръководство за трите режима — преди регистрация, регистриран потребител и клиент на счетоводната фирма — е в [`docs/integration/assistant-profiles.md`](docs/integration/assistant-profiles.md).
+
 ### Health check
 
 ```http

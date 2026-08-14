@@ -17,11 +17,15 @@ import {
   type RawDocumentStorage,
 } from "./domain.js";
 import { DocumentIngestionService, documentMetadataSchema } from "./documents.js";
+import { assistantProfiles, profilePolicy } from "./profiles.js";
+import type { ChatQuotaStore } from "./quotas.js";
 
 const chatRequestSchema = z.object({
   tenantId: z.string().min(1).optional(),
+  assistantProfile: z.enum(assistantProfiles).optional(),
   channel: z.string().min(1).max(50),
   externalUserId: z.string().min(1).max(200),
+  externalOrganizationId: z.string().min(1).max(200).optional(),
   conversationId: z.string().min(1).max(200).optional(),
   message: z.string().min(1).max(20_000),
   context: z
@@ -38,6 +42,7 @@ export interface AppDependencies {
   config: AppConfig;
   chatProvider: ChatProvider;
   conversationStore: ConversationStore;
+  chatQuotaStore: ChatQuotaStore;
   documentRepository: DocumentRepository;
   rawDocumentStorage: RawDocumentStorage;
   documentProcessor: DocumentProcessor;
@@ -146,6 +151,39 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       throw new HttpError(403, "TENANT_MISMATCH", "tenantId не съответства на API клиента.");
     }
 
+    const assistantProfile = body.assistantProfile ?? auth.defaultProfile;
+    if (!auth.allowedProfiles.has(assistantProfile)) {
+      throw new HttpError(403, "ASSISTANT_PROFILE_FORBIDDEN", "API клиентът няма право да използва този режим.");
+    }
+    const policy = profilePolicy(assistantProfile);
+    if (body.message.length > policy.maxMessageCharacters) {
+      throw new HttpError(
+        413,
+        "MESSAGE_TOO_LONG_FOR_PROFILE",
+        `Съобщението надвишава лимита от ${policy.maxMessageCharacters} знака за този режим.`,
+      );
+    }
+    if (policy.requiresOrganization && !body.externalOrganizationId) {
+      throw new HttpError(
+        400,
+        "ORGANIZATION_REQUIRED",
+        "Този режим изисква удостоверен идентификатор на организация.",
+      );
+    }
+
+    const quota = await dependencies.chatQuotaStore.consume({
+      tenantId: auth.tenantId,
+      assistantProfile,
+      externalUserId: body.externalUserId,
+      limit: policy.messagesPerWindow,
+      windowSeconds: policy.quotaWindowSeconds,
+      now: new Date(),
+    });
+    if (!quota.allowed) {
+      reply.header("retry-after", Math.max(1, Math.ceil((quota.resetAt.getTime() - Date.now()) / 1_000)));
+      throw new HttpError(429, "CHAT_QUOTA_EXCEEDED", "Достигнат е лимитът за този режим.");
+    }
+
     const conversationId = body.conversationId ?? randomUUID();
     const context = body.context
       ? {
@@ -157,24 +195,43 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       : undefined;
     const result = await dependencies.chatProvider.generate({
       tenantId: auth.tenantId,
+      assistantProfile,
+      ...(body.externalOrganizationId
+        ? { externalOrganizationId: body.externalOrganizationId }
+        : {}),
       message: body.message,
       ...(context ? { context } : {}),
     });
 
     await dependencies.conversationStore.saveExchange({
       tenantId: auth.tenantId,
+      assistantProfile,
       externalUserId: body.externalUserId,
+      ...(body.externalOrganizationId
+        ? { externalOrganizationId: body.externalOrganizationId }
+        : {}),
       conversationId,
       channel: body.channel,
       userMessage: body.message,
       assistantMessage: result.answer,
       status: result.status,
       requestId: request.id,
+      retentionDays: policy.retentionDays,
       createdAt: new Date(),
     });
 
     return reply.send({
       ...result,
+      assistantProfile,
+      capabilities: {
+        humanEscalation: policy.allowsHumanEscalation,
+        organizationDocuments: policy.allowsOrganizationDocuments,
+      },
+      quota: {
+        limit: quota.limit,
+        remaining: quota.remaining,
+        resetAt: quota.resetAt.toISOString(),
+      },
       conversationId,
       requestId: request.id,
     });
@@ -261,6 +318,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       category: document.category,
       sourceType: document.sourceType,
       accessLevel: document.accessLevel,
+      organizationId: document.organizationId,
       jurisdiction: document.jurisdiction,
       publisher: document.publisher,
       sourceUrl: document.sourceUrl,
@@ -309,6 +367,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
 
   app.addHook("onClose", async () => {
+    await dependencies.chatQuotaStore.close();
     await dependencies.documentRepository.close();
     await dependencies.conversationStore.close();
   });

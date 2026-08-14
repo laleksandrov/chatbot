@@ -55,6 +55,8 @@ npm run db:migrate
 npm run production:verify
 ```
 
+`production:verify` проверява достъпа до OpenAI vector store. Статус `expired` и хранилище без нито един обработен файл спират deployment-а. Статус `in_progress` с вече налични `completed` файлове се отчита като предупреждение, защото ingestion worker-ът може нормално да индексира нови документи по време на deployment.
+
 `production:verify` е read-only проверка на приложените миграции, ingestion колоните и достъпа до OpenAI vector store.
 
 ## 5. Процеси

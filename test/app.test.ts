@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../src/app.js";
 import { FakeChatProvider } from "../src/chat.js";
@@ -14,6 +14,7 @@ import {
   LocalRawDocumentStorage,
   PendingDocumentProcessor,
 } from "../src/documents.js";
+import { InMemoryChatQuotaStore } from "../src/quotas.js";
 
 const apiKey = "ems-test-key";
 
@@ -45,7 +46,14 @@ describe("chatbot API", () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  async function buildApp(chatProvider: ChatProvider = new FakeChatProvider()) {
+  async function buildApp(
+    chatProvider: ChatProvider = new FakeChatProvider(),
+    allowedProfiles: AppConfig["apiClients"][number]["allowedProfiles"] = [
+      "public_pre_registration",
+      "registered_customer",
+      "accounting_client",
+    ],
+  ) {
     const config: AppConfig = {
       nodeEnv: "test",
       host: "127.0.0.1",
@@ -57,6 +65,8 @@ describe("chatbot API", () => {
           tenantId: "ems",
           key: apiKey,
           roles: ["chat", "documents:read", "documents:write", "documents:global"],
+          allowedProfiles,
+          defaultProfile: "registered_customer",
         },
       ],
       aiProvider: "fake",
@@ -79,6 +89,7 @@ describe("chatbot API", () => {
       config,
       chatProvider,
       conversationStore: conversations,
+      chatQuotaStore: new InMemoryChatQuotaStore(),
       documentRepository: documents,
       rawDocumentStorage: new LocalRawDocumentStorage(dataDir),
       documentProcessor: new PendingDocumentProcessor(),
@@ -119,6 +130,7 @@ describe("chatbot API", () => {
       },
       chatProvider: new FakeChatProvider(),
       conversationStore: new InMemoryConversationStore(),
+      chatQuotaStore: new InMemoryChatQuotaStore(),
       documentRepository: new InMemoryDocumentRepository(),
       rawDocumentStorage: new LocalRawDocumentStorage(dataDir),
       documentProcessor: new PendingDocumentProcessor(),
@@ -162,6 +174,7 @@ describe("chatbot API", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       status: "needs_clarification",
+      assistantProfile: "registered_customer",
       asOf: "2026-08-13",
       sources: [],
     });
@@ -262,6 +275,114 @@ describe("chatbot API", () => {
     });
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe("TENANT_MISMATCH");
+    await app.close();
+  });
+
+  it("requires an organization for accounting clients", async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        assistantProfile: "accounting_client",
+        channel: "platform",
+        externalUserId: "user-1",
+        message: "Въпрос",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("ORGANIZATION_REQUIRED");
+    await app.close();
+  });
+
+  it("does not allow a browser-facing credential to elevate its profile", async () => {
+    const app = await buildApp(new FakeChatProvider(), ["public_pre_registration"]);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        assistantProfile: "registered_customer",
+        channel: "public-web",
+        externalUserId: "anonymous-1",
+        message: "Въпрос",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe("ASSISTANT_PROFILE_FORBIDDEN");
+    await app.close();
+  });
+
+  it("passes the accounting organization to the provider", async () => {
+    const generate = vi.fn(async () => ({
+      status: "needs_clarification" as const,
+      answer: "Уточнете въпроса.",
+      asOf: "2026-08-13",
+      sources: [],
+      warnings: [],
+    }));
+    const app = await buildApp({ generate });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        assistantProfile: "accounting_client",
+        channel: "platform",
+        externalUserId: "user-1",
+        externalOrganizationId: "company-42",
+        message: "Въпрос",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantProfile: "accounting_client",
+        externalOrganizationId: "company-42",
+      }),
+    );
+    expect(response.json().capabilities).toEqual({
+      humanEscalation: true,
+      organizationDocuments: true,
+    });
+    await app.close();
+  });
+
+  it("enforces the public daily quota", async () => {
+    const app = await buildApp();
+    for (let index = 0; index < 10; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat",
+        headers: { authorization: `Bearer ${apiKey}` },
+        payload: {
+          assistantProfile: "public_pre_registration",
+          channel: "public-web",
+          externalUserId: "anonymous-1",
+          message: "Как се регистрирам?",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const limited = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        assistantProfile: "public_pre_registration",
+        channel: "public-web",
+        externalUserId: "anonymous-1",
+        message: "Още един въпрос",
+      },
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error.code).toBe("CHAT_QUOTA_EXCEEDED");
+    expect(limited.headers["retry-after"]).toBeDefined();
     await app.close();
   });
 
