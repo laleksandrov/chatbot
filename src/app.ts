@@ -17,6 +17,7 @@ import {
   type RawDocumentStorage,
 } from "./domain.js";
 import { DocumentIngestionService, documentMetadataSchema } from "./documents.js";
+import { landingPageHtml } from "./landing.js";
 import { assistantProfiles, profilePolicy } from "./profiles.js";
 import type { ChatQuotaStore } from "./quotas.js";
 
@@ -133,6 +134,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     });
   });
 
+  app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(landingPageHtml));
   app.get("/health", async () => ({ status: "ok" }));
   app.get("/ready", async (_request, reply) => {
     try {

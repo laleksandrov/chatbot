@@ -225,6 +225,17 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("serves the Leon chatbot landing page", async () => {
+    const app = await buildApp();
+    const response = await app.inject({ method: "GET", url: "/" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.body).toContain("Леон AI");
+    expect(response.body).toContain("Бизнес въпросите ти имат");
+    await app.close();
+  });
+
   it("retries a failed document without creating a duplicate", async () => {
     const app = await buildApp();
     const multipart = multipartPayload(
