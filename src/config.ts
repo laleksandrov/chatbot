@@ -33,6 +33,10 @@ const apiClientSchema = z
     path: ["defaultProfile"],
   });
 
+export function parseApiClients(value: string): ApiClient[] {
+  return z.array(apiClientSchema).parse(JSON.parse(value));
+}
+
 const rawConfigSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -119,11 +123,7 @@ export interface AppConfig {
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const raw = rawConfigSchema.parse(environment);
-  const apiClients = z.array(apiClientSchema).parse(JSON.parse(raw.API_CLIENTS_JSON));
-
-  if (raw.NODE_ENV === "production" && apiClients.length === 0) {
-    throw new Error("At least one API client is required in production");
-  }
+  const apiClients = parseApiClients(raw.API_CLIENTS_JSON);
 
   let conversationEncryptionKey: Buffer | undefined;
   if (raw.CONVERSATION_ENCRYPTION_KEY) {

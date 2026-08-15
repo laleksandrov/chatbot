@@ -34,8 +34,7 @@ OPENAI_VECTOR_STORE_ID=<vs_...>
 Генерирай отделни стойности за:
 
 - `CONVERSATION_ENCRYPTION_KEY`: 32 random bytes, Base64 encoded;
-- EMS API key: минимум 32 random bytes;
-- `API_CLIENTS_JSON`: EMS tenant с необходимите роли.
+- `API_CLIENTS_JSON`: само временен fallback при първото прехвърляне на съществуващите ключове към PostgreSQL.
 
 Примерната структура е в `.env.example`. Реалните стойности не трябва да попадат в shell history, Git, deployment logs или chat.
 
@@ -70,7 +69,11 @@ npm run worker
 
 И двата процеса трябва да се рестартират след успешен deployment. API слуша само на `127.0.0.1:3000`; Nginx е публичната TLS граница.
 
-## 6. Приемателен тест
+## 6. Администраторски достъп
+
+След миграция `005_access_management.sql` човешките администратори и API клиентите се пазят в PostgreSQL. За първоначално създаване на администратор и безопасно прехвърляне на съществуващия `API_CLIENTS_JSON` следвайте [`../security/access-management.md`](../security/access-management.md). Не премахвайте стария JSON преди импорта и успешен тест на EasyStart и EMS.
+
+## 7. Приемателен тест
 
 1. `GET /health` връща `200 {"status":"ok"}`.
 2. `GET /ready` връща `200 {"status":"ready"}` и реално изпълнява `SELECT 1` към PostgreSQL.

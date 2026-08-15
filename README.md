@@ -374,6 +374,8 @@ DATA_DIR=./data
 MAX_DOCUMENT_BYTES=26214400
 ```
 
+API клиентите и човешките администратори се пазят в PostgreSQL и се управляват през `/admin`. `API_CLIENTS_JSON` е само временен fallback за еднократната миграция на съществуващи ключове и след нея остава празен. Пълната процедура и моделът на правата са описани в [`docs/security/access-management.md`](docs/security/access-management.md).
+
 Реалният `.env` остава само в защитената среда на сървъра.
 
 ## Deployment чрез Laravel Forge

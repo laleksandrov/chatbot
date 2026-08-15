@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import multipart from "@fastify/multipart";
+import cookie from "@fastify/cookie";
+import formbody from "@fastify/formbody";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify, { type FastifyInstance } from "fastify";
 import { ZodError, z } from "zod";
 
 import { HttpError, registerAuthentication, requireRole } from "./auth.js";
+import { StaticApiClientAuthenticator, type AccessAdminRepository, type ApiClientAuthenticator } from "./access.js";
+import { registerAdminRoutes } from "./admin.js";
 import type { AppConfig } from "./config.js";
 import {
   ChatProviderUnavailableError,
@@ -48,6 +52,8 @@ export interface AppDependencies {
   rawDocumentStorage: RawDocumentStorage;
   documentProcessor: DocumentProcessor;
   readinessCheck?: () => Promise<void>;
+  apiClientAuthenticator?: ApiClientAuthenticator;
+  adminRepository?: AccessAdminRepository;
 }
 
 export async function createApp(dependencies: AppDependencies): Promise<FastifyInstance> {
@@ -68,6 +74,8 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     },
   });
   await app.register(swaggerUi, { routePrefix: "/docs" });
+  await app.register(cookie);
+  await app.register(formbody);
   await app.register(multipart, {
     limits: {
       files: 1,
@@ -75,7 +83,13 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       fileSize: config.maxDocumentBytes,
     },
   });
-  await registerAuthentication(app, config.apiClients);
+  await registerAuthentication(
+    app,
+    dependencies.apiClientAuthenticator ?? new StaticApiClientAuthenticator(config.apiClients),
+  );
+  if (dependencies.adminRepository) {
+    await registerAdminRoutes(app, dependencies.adminRepository, config.nodeEnv === "production");
+  }
 
   const ingestion = new DocumentIngestionService(
     dependencies.rawDocumentStorage,

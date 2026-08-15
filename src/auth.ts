@@ -1,8 +1,7 @@
-import { timingSafeEqual } from "node:crypto";
-
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
-import type { ApiClient, ApiRole } from "./config.js";
+import type { ApiClientAuthenticator } from "./access.js";
+import type { ApiRole } from "./config.js";
 import type { AssistantProfile } from "./profiles.js";
 
 export interface AuthContext {
@@ -28,21 +27,14 @@ export class HttpError extends Error {
   }
 }
 
-function keysMatch(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function authenticate(request: FastifyRequest, clients: readonly ApiClient[]): AuthContext {
+async function authenticate(request: FastifyRequest, authenticator: ApiClientAuthenticator): Promise<AuthContext> {
   const authorization = request.headers.authorization;
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   if (!match?.[1]) {
     throw new HttpError(401, "UNAUTHORIZED", "Липсва Bearer API ключ.");
   }
 
-  const token = match[1];
-  const client = clients.find((candidate) => keysMatch(candidate.key, token));
+  const client = await authenticator.authenticateApiKey(match[1]);
   if (!client) {
     throw new HttpError(401, "UNAUTHORIZED", "Невалиден API ключ.");
   }
@@ -65,11 +57,11 @@ export function requireRole(request: FastifyRequest, role: ApiRole): AuthContext
   return request.auth;
 }
 
-export async function registerAuthentication(app: FastifyInstance, clients: readonly ApiClient[]): Promise<void> {
+export async function registerAuthentication(app: FastifyInstance, authenticator: ApiClientAuthenticator): Promise<void> {
   app.decorateRequest("auth", null);
   app.addHook("onRequest", async (request) => {
     if (request.url.startsWith("/v1/")) {
-      request.auth = authenticate(request, clients);
+      request.auth = await authenticate(request, authenticator);
     }
   });
 }

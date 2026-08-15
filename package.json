@@ -17,10 +17,14 @@
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "admin:create": "node --env-file-if-exists=.env --import tsx scripts/create-admin.ts",
+    "api-clients:import-env": "node --env-file-if-exists=.env --import tsx scripts/import-api-clients.ts",
     "documents:upload": "node --env-file-if-exists=.env.ingestion --import tsx scripts/upload-document.ts",
     "production:verify": "node --env-file-if-exists=.env --import tsx scripts/verify-production.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/formbody": "^9.0.0",
     "@fastify/multipart": "^10.1.0",
     "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",

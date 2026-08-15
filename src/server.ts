@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
 
 import {
+  FallbackApiClientAuthenticator,
+  PostgresAccessRepository,
+  StaticApiClientAuthenticator,
+} from "./access.js";
+import {
   InMemoryConversationStore,
   PostgresConversationStore,
   createPostgresPool,
@@ -19,6 +24,11 @@ import { InMemoryChatQuotaStore, PostgresChatQuotaStore } from "./quotas.js";
 
 const config = loadConfig();
 const pool = config.databaseUrl ? createPostgresPool(config.databaseUrl) : undefined;
+const staticAuthenticator = new StaticApiClientAuthenticator(config.apiClients);
+const accessRepository = pool ? new PostgresAccessRepository(pool) : undefined;
+const apiClientAuthenticator = accessRepository
+  ? new FallbackApiClientAuthenticator(accessRepository, staticAuthenticator)
+  : staticAuthenticator;
 
 const conversationStore =
   pool && config.conversationEncryptionKey
@@ -53,6 +63,8 @@ const app = await createApp({
   documentRepository,
   rawDocumentStorage: new LocalRawDocumentStorage(resolve(config.dataDir)),
   documentProcessor: new PendingDocumentProcessor(),
+  apiClientAuthenticator,
+  ...(accessRepository ? { adminRepository: accessRepository } : {}),
   ...(pool ? { readinessCheck: async () => { await pool.query("SELECT 1"); } } : {}),
 });
 

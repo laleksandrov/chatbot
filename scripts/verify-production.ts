@@ -19,6 +19,8 @@ try {
     "001_initial.sql",
     "002_document_ingestion_queue.sql",
     "003_assistant_profiles_and_quotas.sql",
+    "004_public_platform_documents.sql",
+    "005_access_management.sql",
   ]) {
     if (!migrations.includes(expected)) throw new Error(`Missing database migration: ${expected}`);
   }
@@ -53,6 +55,12 @@ try {
      WHERE table_schema = 'public' AND table_name = 'chat_quota_windows'`,
   );
   if (profileTables.rowCount !== 1) throw new Error("Missing chat_quota_windows table");
+  const accessTables = await pool.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+    [["users", "api_clients", "admin_sessions"]],
+  );
+  if (accessTables.rowCount !== 3) throw new Error("Missing access-management tables");
   console.log(`PostgreSQL ready; migrations: ${migrations.join(", ")}`);
 } finally {
   await pool.end();
