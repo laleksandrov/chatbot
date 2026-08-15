@@ -53,6 +53,11 @@ export interface AccessAdminRepository extends ApiClientAuthenticator {
     defaultProfile: AssistantProfile;
   }): Promise<{ client: ApiClientView; key: string }>;
   setApiClientActive(id: string, active: boolean): Promise<boolean>;
+  updateApiClientAccess(id: string, input: {
+    roles: ApiRole[];
+    allowedProfiles: AssistantProfile[];
+    defaultProfile: AssistantProfile;
+  }): Promise<boolean>;
   importApiClient(name: string, client: ApiClient): Promise<void>;
   listUsers(): Promise<AdminUserView[]>;
   createUser(input: { email: string; password: string; isAdmin: boolean }): Promise<AdminUserView>;
@@ -213,6 +218,19 @@ export class PostgresAccessRepository implements AccessAdminRepository {
     const result = await this.pool.query(
       "UPDATE api_clients SET active = $2, updated_at = now() WHERE id = $1",
       [id, active],
+    );
+    return result.rowCount === 1;
+  }
+
+  async updateApiClientAccess(id: string, input: {
+    roles: ApiRole[];
+    allowedProfiles: AssistantProfile[];
+    defaultProfile: AssistantProfile;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE api_clients SET roles = $2, allowed_profiles = $3, default_profile = $4, updated_at = now()
+       WHERE id = $1`,
+      [id, input.roles, input.allowedProfiles, input.defaultProfile],
     );
     return result.rowCount === 1;
   }

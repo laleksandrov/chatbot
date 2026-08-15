@@ -28,6 +28,7 @@ describe("admin access management", () => {
       listApiClients: vi.fn(async () => []),
       createApiClient: vi.fn(async (input) => ({ client: { id: "client-1", ...input, keyPrefix: "cb_example", active: true, lastUsedAt: null, createdAt: new Date() }, key: "cb_generated_secret" })),
       setApiClientActive: vi.fn(async () => true),
+      updateApiClientAccess: vi.fn(async () => true),
       importApiClient: vi.fn(async () => undefined),
       listUsers: vi.fn(async () => [session.user]),
       createUser: vi.fn(async (input) => ({ id: "user-2", email: input.email, isAdmin: input.isAdmin, active: true, lastLoginAt: null, createdAt: new Date() })),
@@ -63,6 +64,10 @@ describe("admin access management", () => {
     expect(create.statusCode).toBe(200);
     expect(create.body).toContain("cb_generated_secret");
     expect(repository.createApiClient).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "easystart", roles: ["chat"] }));
+
+    const update = await app.inject({ method: "POST", url: "/admin/api-clients/client-1/access", headers: { cookie }, payload: { csrf: "csrf-test-token", roles: ["chat", "documents:read"], profiles: "registered_customer", defaultProfile: "registered_customer" } });
+    expect(update.statusCode).toBe(302);
+    expect(repository.updateApiClientAccess).toHaveBeenCalledWith("client-1", expect.objectContaining({ roles: ["chat", "documents:read"] }));
     await app.close();
   });
 });
