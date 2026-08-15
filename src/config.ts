@@ -47,6 +47,8 @@ const rawConfigSchema = z
       .default("false")
       .transform((value) => value === "true"),
     LOG_LEVEL: z.string().default("info"),
+    ADMIN_EMAIL: z.string().email().optional(),
+    ADMIN_PASSWORD: z.string().min(12).optional(),
     API_CLIENTS_JSON: z.string().default("[]"),
     AI_PROVIDER: z.enum(["fake", "openai"]).default("fake"),
     OPENAI_API_KEY: z.string().optional(),
@@ -68,6 +70,12 @@ const rawConfigSchema = z
     MAX_DOCUMENT_BYTES: z.coerce.number().int().min(1).max(512 * 1024 * 1024).default(25 * 1024 * 1024),
   })
   .superRefine((value, context) => {
+    if (Boolean(value.ADMIN_EMAIL) !== Boolean(value.ADMIN_PASSWORD)) {
+      context.addIssue({
+        code: "custom",
+        message: "ADMIN_EMAIL and ADMIN_PASSWORD must be configured together",
+      });
+    }
     if (Boolean(value.DATABASE_URL) !== Boolean(value.CONVERSATION_ENCRYPTION_KEY)) {
       context.addIssue({
         code: "custom",
@@ -100,6 +108,8 @@ export interface AppConfig {
   port: number;
   trustProxy: boolean;
   logLevel: string;
+  adminEmail?: string;
+  adminPassword?: string;
   apiClients: ApiClient[];
   aiProvider: "fake" | "openai";
   openAiApiKey?: string;
@@ -139,6 +149,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     port: raw.PORT,
     trustProxy: raw.TRUST_PROXY,
     logLevel: raw.LOG_LEVEL,
+    ...(raw.ADMIN_EMAIL ? { adminEmail: raw.ADMIN_EMAIL.toLowerCase() } : {}),
+    ...(raw.ADMIN_PASSWORD ? { adminPassword: raw.ADMIN_PASSWORD } : {}),
     apiClients,
     aiProvider: raw.AI_PROVIDER,
     ...(raw.OPENAI_API_KEY ? { openAiApiKey: raw.OPENAI_API_KEY } : {}),

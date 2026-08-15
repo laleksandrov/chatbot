@@ -25,7 +25,14 @@ import { InMemoryChatQuotaStore, PostgresChatQuotaStore } from "./quotas.js";
 const config = loadConfig();
 const pool = config.databaseUrl ? createPostgresPool(config.databaseUrl) : undefined;
 const staticAuthenticator = new StaticApiClientAuthenticator(config.apiClients);
-const accessRepository = pool ? new PostgresAccessRepository(pool) : undefined;
+const accessRepository = pool
+  ? new PostgresAccessRepository(
+      pool,
+      config.adminEmail && config.adminPassword
+        ? { email: config.adminEmail, password: config.adminPassword }
+        : undefined,
+    )
+  : undefined;
 const apiClientAuthenticator = accessRepository
   ? new FallbackApiClientAuthenticator(accessRepository, staticAuthenticator)
   : staticAuthenticator;

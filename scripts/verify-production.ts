@@ -21,6 +21,7 @@ try {
     "003_assistant_profiles_and_quotas.sql",
     "004_public_platform_documents.sql",
     "005_access_management.sql",
+    "006_environment_admin.sql",
   ]) {
     if (!migrations.includes(expected)) throw new Error(`Missing database migration: ${expected}`);
   }
@@ -61,6 +62,11 @@ try {
     [["users", "api_clients", "admin_sessions"]],
   );
   if (accessTables.rowCount !== 3) throw new Error("Missing access-management tables");
+  const adminSessionColumns = await pool.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'admin_sessions' AND column_name = 'admin_email'`,
+  );
+  if (adminSessionColumns.rowCount !== 1) throw new Error("Missing admin_sessions.admin_email column");
   console.log(`PostgreSQL ready; migrations: ${migrations.join(", ")}`);
 } finally {
   await pool.end();

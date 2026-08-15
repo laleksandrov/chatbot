@@ -170,7 +170,10 @@ function mapUser(row: UserRow): AdminUserView {
 }
 
 export class PostgresAccessRepository implements AccessAdminRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly environmentAdmin?: { email: string; password: string },
+  ) {}
 
   async authenticateApiKey(key: string): Promise<ApiClientIdentity | null> {
     const result = await this.pool.query<ApiClientRow>(
@@ -279,7 +282,7 @@ export class PostgresAccessRepository implements AccessAdminRepository {
       const target = await client.query<UserRow>("SELECT * FROM users WHERE id = $1 FOR UPDATE", [id]);
       const row = target.rows[0];
       if (!row) { await client.query("ROLLBACK"); return false; }
-      if (row.active && row.is_admin && (!input.active || !input.isAdmin)) {
+      if (!this.environmentAdmin && row.active && row.is_admin && (!input.active || !input.isAdmin)) {
         const count = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM users WHERE active = true AND is_admin = true");
         if (Number(count.rows[0]?.count ?? 0) <= 1) throw new Error("Последният активен администратор не може да бъде спрян.");
       }
@@ -295,6 +298,33 @@ export class PostgresAccessRepository implements AccessAdminRepository {
   }
 
   async createSession(email: string, password: string): Promise<{ token: string; session: AdminSession } | null> {
+    if (this.environmentAdmin) {
+      const emailMatches = safeEqual(email.trim().toLowerCase(), this.environmentAdmin.email.toLowerCase());
+      const passwordMatches = safeEqual(password, this.environmentAdmin.password);
+      if (!emailMatches || !passwordMatches) return null;
+      const token = randomBytes(32).toString("base64url");
+      const csrfToken = randomBytes(24).toString("base64url");
+      await this.pool.query("DELETE FROM admin_sessions WHERE expires_at <= now()");
+      await this.pool.query(
+        `INSERT INTO admin_sessions (token_hash, user_id, admin_email, csrf_token, expires_at, created_at)
+         VALUES ($1, NULL, $2, $3, now() + interval '12 hours', now())`,
+        [sha256(token), this.environmentAdmin.email.toLowerCase(), csrfToken],
+      );
+      return {
+        token,
+        session: {
+          user: {
+            id: "environment-admin",
+            email: this.environmentAdmin.email.toLowerCase(),
+            isAdmin: true,
+            active: true,
+            lastLoginAt: null,
+            createdAt: new Date(0),
+          },
+          csrfToken,
+        },
+      };
+    }
     const result = await this.pool.query<UserRow>(
       "SELECT * FROM users WHERE email = lower($1) AND active = true AND is_admin = true",
       [email.trim()],
@@ -314,14 +344,23 @@ export class PostgresAccessRepository implements AccessAdminRepository {
   }
 
   async findSession(token: string): Promise<AdminSession | null> {
-    const result = await this.pool.query<UserRow & { csrf_token: string }>(
-      `SELECT u.*, s.csrf_token FROM admin_sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active = true AND u.is_admin = true`,
-      [sha256(token)],
+    const result = await this.pool.query<UserRow & { csrf_token: string; admin_email: string | null }>(
+      `SELECT u.*, s.csrf_token, s.admin_email FROM admin_sessions s
+       LEFT JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = $1 AND s.expires_at > now()
+         AND ((s.admin_email IS NOT NULL AND s.admin_email = $2) OR
+              (s.admin_email IS NULL AND u.active = true AND u.is_admin = true))`,
+      [sha256(token), this.environmentAdmin?.email.toLowerCase() ?? ""],
     );
     const row = result.rows[0];
-    return row ? { user: mapUser(row), csrfToken: row.csrf_token } : null;
+    if (!row) return null;
+    if (row.admin_email) {
+      return {
+        user: { id: "environment-admin", email: row.admin_email, isAdmin: true, active: true, lastLoginAt: null, createdAt: new Date(0) },
+        csrfToken: row.csrf_token,
+      };
+    }
+    return { user: mapUser(row), csrfToken: row.csrf_token };
   }
 
   async deleteSession(token: string): Promise<void> {

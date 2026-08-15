@@ -71,7 +71,7 @@ npm run worker
 
 ## 6. Администраторски достъп
 
-След миграция `005_access_management.sql` човешките администратори и API клиентите се пазят в PostgreSQL. За първоначално създаване на администратор и безопасно прехвърляне на съществуващия `API_CLIENTS_JSON` следвайте [`../security/access-management.md`](../security/access-management.md). Не премахвайте стария JSON преди импорта и успешен тест на EasyStart и EMS.
+След миграция `006_environment_admin.sql` достъпът до `/admin` се задава с `ADMIN_EMAIL` и `ADMIN_PASSWORD` във Forge environment. Останалите потребители и API клиентите се пазят в PostgreSQL. За безопасно прехвърляне на съществуващия `API_CLIENTS_JSON` следвайте [`../security/access-management.md`](../security/access-management.md). Не премахвайте стария JSON преди импорта и успешен тест на EasyStart и EMS.
 
 ## 7. Приемателен тест
 
