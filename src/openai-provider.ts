@@ -65,8 +65,20 @@ const globalKnowledgeFilter: FileSearchFilter = {
 
 function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
   const policy = profilePolicy(input.assistantProfile);
+
+  const publicTenantKnowledgeFilter: FileSearchFilter = {
+    type: "and",
+    filters: [
+      { key: "accessLevel", type: "eq", value: "tenant" },
+      { key: "tenantId", type: "eq", value: input.tenantId },
+      { key: "documentScope", type: "eq", value: "public" },
+    ],
+  };
+
   if (!policy.allowsTenantDocuments && !policy.allowsOrganizationDocuments) {
-    return globalKnowledgeFilter;
+    return policy.allowsPublicTenantDocuments
+      ? { type: "or", filters: [globalKnowledgeFilter, publicTenantKnowledgeFilter] }
+      : globalKnowledgeFilter;
   }
 
   const tenantKnowledgeFilter: FileSearchFilter = {
@@ -78,7 +90,14 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
     ],
   };
   if (policy.allowsTenantDocuments) {
-    return { type: "or", filters: [globalKnowledgeFilter, tenantKnowledgeFilter] };
+    return {
+      type: "or",
+      filters: [
+        globalKnowledgeFilter,
+        ...(policy.allowsPublicTenantDocuments ? [publicTenantKnowledgeFilter] : []),
+        tenantKnowledgeFilter,
+      ],
+    };
   }
 
   if (!input.externalOrganizationId) {

@@ -23,6 +23,7 @@ export const documentMetadataSchema = z
     category: z.string().min(1).max(100),
     sourceType: z.enum(["legislation", "institutional", "internal", "professional"]),
     accessLevel: z.enum(["global", "tenant"]).default("tenant"),
+    publiclyAccessible: z.boolean().default(false),
     organizationId: z.string().min(1).max(200).optional(),
     jurisdiction: z.string().min(2).max(20).default("BG"),
     publisher: z.string().min(1).max(200).optional(),
@@ -38,6 +39,18 @@ export const documentMetadataSchema = z
   .refine((value) => value.accessLevel !== "global" || !value.organizationId, {
     message: "organizationId is only valid for tenant documents",
     path: ["organizationId"],
+  })
+  .refine((value) => !value.publiclyAccessible || value.accessLevel === "tenant", {
+    message: "publiclyAccessible is only valid for tenant documents",
+    path: ["publiclyAccessible"],
+  })
+  .refine((value) => !value.publiclyAccessible || !value.organizationId, {
+    message: "organization documents cannot be publicly accessible",
+    path: ["publiclyAccessible"],
+  })
+  .refine((value) => !value.publiclyAccessible || value.sourceType !== "internal", {
+    message: "internal documents cannot be publicly accessible",
+    path: ["publiclyAccessible"],
   });
 
 export type DocumentMetadata = z.infer<typeof documentMetadataSchema>;
@@ -261,6 +274,7 @@ interface DocumentRow {
   category: string;
   source_type: DocumentRecord["sourceType"];
   access_level: DocumentRecord["accessLevel"];
+  publicly_accessible: boolean;
   organization_id: string | null;
   jurisdiction: string;
   publisher: string | null;
@@ -299,6 +313,7 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     category: row.category,
     sourceType: row.source_type,
     accessLevel: row.access_level,
+    publiclyAccessible: row.publicly_accessible,
     ...(row.organization_id ? { organizationId: row.organization_id } : {}),
     jurisdiction: row.jurisdiction,
     ...(row.publisher ? { publisher: row.publisher } : {}),
@@ -332,16 +347,16 @@ export class PostgresDocumentRepository implements DocumentWorkRepository {
   async save(document: DocumentRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO documents (
-         id, tenant_id, title, category, source_type, access_level, organization_id, jurisdiction,
+         id, tenant_id, title, category, source_type, access_level, publicly_accessible, organization_id, jurisdiction,
          publisher, source_url, published_at, valid_from, valid_to,
          original_filename, mime_type, size_bytes, sha256, storage_key,
          status, error, attempt_count, next_attempt_at, lease_until, worker_id,
          openai_file_id, vector_store_id, vector_store_file_id, indexed_at,
          created_at, updated_at
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-         $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-         $25, $26, $27, $28, $29, $30
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+         $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+         $26, $27, $28, $29, $30, $31
        )`,
       [
         document.id,
@@ -350,6 +365,7 @@ export class PostgresDocumentRepository implements DocumentWorkRepository {
         document.category,
         document.sourceType,
         document.accessLevel,
+        document.publiclyAccessible ?? false,
         document.organizationId ?? null,
         document.jurisdiction,
         document.publisher ?? null,
@@ -567,6 +583,7 @@ export class DocumentIngestionService {
       category: input.metadata.category,
       sourceType: input.metadata.sourceType,
       accessLevel: input.metadata.accessLevel,
+      publiclyAccessible: input.metadata.publiclyAccessible,
       ...(input.metadata.organizationId ? { organizationId: input.metadata.organizationId } : {}),
       jurisdiction: input.metadata.jurisdiction,
       ...(input.metadata.publisher ? { publisher: input.metadata.publisher } : {}),

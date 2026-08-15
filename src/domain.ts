@@ -87,6 +87,7 @@ export interface DocumentRecord {
   category: string;
   sourceType: "legislation" | "institutional" | "internal" | "professional";
   accessLevel: "global" | "tenant";
+  publiclyAccessible?: boolean;
   organizationId?: string;
   jurisdiction: string;
   publisher?: string;

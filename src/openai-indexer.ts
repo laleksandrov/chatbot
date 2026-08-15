@@ -39,7 +39,14 @@ function attributesFor(document: DocumentRecord): Record<string, string> {
       sourceType: document.sourceType,
       accessLevel: document.accessLevel,
       organizationId: document.organizationId,
-      documentScope: document.organizationId ? "organization" : document.accessLevel,
+      documentScope:
+        document.accessLevel === "global"
+          ? "global"
+          : document.organizationId
+            ? "organization"
+            : document.publiclyAccessible
+              ? "public"
+              : "tenant",
       jurisdiction: document.jurisdiction,
       publisher: document.publisher,
       sourceUrl: document.sourceUrl,

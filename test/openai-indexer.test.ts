@@ -146,6 +146,46 @@ describe("OpenAIDocumentIndexer", () => {
     });
   });
 
+  it("marks public platform documents with an isolated public scope", async () => {
+    const createFile = vi.fn().mockResolvedValue({ id: "file_1" });
+    const retrieve = vi.fn()
+      .mockRejectedValueOnce({ status: 404 })
+      .mockResolvedValueOnce(vectorFile("completed"));
+    const attach = vi.fn().mockResolvedValue(vectorFile("in_progress"));
+    const client = {
+      files: { create: createFile },
+      vectorStores: { files: { retrieve, create: attach } },
+    } as unknown as OpenAI;
+    const indexer = new OpenAIDocumentIndexer({
+      apiKey: "test-key",
+      vectorStoreId: "vs_1",
+      pollIntervalMs: 100,
+      pollTimeoutMs: 1_000,
+      client,
+      sleep: async () => {},
+      now: () => baseTime,
+    });
+
+    await indexer.index({
+      document: document({
+        tenantId: "easystart",
+        title: "EasyStart prices",
+        sourceType: "professional",
+        publiclyAccessible: true,
+      }),
+      content: Buffer.from("test"),
+      onFileUploaded: async () => {},
+    });
+
+    expect(attach.mock.calls[0]?.[1]).toMatchObject({
+      attributes: {
+        tenantId: "easystart",
+        accessLevel: "tenant",
+        documentScope: "public",
+      },
+    });
+  });
+
   it("classifies an invalid vector-store file as a permanent failure", async () => {
     const failed = vectorFile("failed", { code: "invalid_file", message: "invalid content" });
     const client = {

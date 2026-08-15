@@ -17,6 +17,56 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
 }
 
 describe("OpenAIChatProvider", () => {
+  it("constrains the public profile to EasyStart registration and cost planning", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "out_of_scope",
+        answer: "Този въпрос не е достъпен преди регистрация.",
+        asOf: "2026-08-15",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "public_pre_registration",
+      message: "Какво мога да правя в платформата?",
+    });
+
+    const request = parse.mock.calls[0]?.[0] as {
+      instructions: string;
+      tools: Array<{ filters: unknown }>;
+    };
+    expect(request.instructions).toContain("цени на платформата");
+    expect(request.instructions).toContain("нотариални и банкови такси");
+    expect(request.instructions).toContain("осигурителни вноски");
+    expect(request.instructions).toContain("ориентировъчен сценарий");
+    expect(request.instructions).toContain("не са пряко свързани");
+    expect(request.tools[0]?.filters).toEqual({
+      type: "or",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "global" },
+            { key: "sourceType", type: "ne", value: "internal" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "easystart" },
+            { key: "documentScope", type: "eq", value: "public" },
+          ],
+        },
+      ],
+    });
+  });
+
   it("uses tenant-safe File Search and maps verified evidence", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
@@ -91,6 +141,14 @@ describe("OpenAIChatProvider", () => {
           filters: [
             { key: "accessLevel", type: "eq", value: "global" },
             { key: "sourceType", type: "ne", value: "internal" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "ems" },
+            { key: "documentScope", type: "eq", value: "public" },
           ],
         },
         {

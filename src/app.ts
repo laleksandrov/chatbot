@@ -320,6 +320,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       category: document.category,
       sourceType: document.sourceType,
       accessLevel: document.accessLevel,
+      publiclyAccessible: document.publiclyAccessible ?? false,
       organizationId: document.organizationId,
       jurisdiction: document.jurisdiction,
       publisher: document.publisher,
