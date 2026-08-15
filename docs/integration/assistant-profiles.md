@@ -30,7 +30,7 @@
 
 ## API клиенти
 
-Използват се три отделни ключа. Разрешеният режим се определя от сървъра, а не от стойност, избрана в браузъра:
+Използват се отделни ключове за двата EasyStart chat режима, централното управление на знанията и EMS. Разрешеният режим се определя от сървъра, а не от стойност, избрана в браузъра:
 
 ```json
 [
@@ -49,9 +49,16 @@
     "defaultProfile": "registered_customer"
   },
   {
+    "tenantId": "knowledge-admin",
+    "key": "...",
+    "roles": ["documents:read", "documents:write", "documents:global", "documents:tenants"],
+    "allowedProfiles": ["registered_customer"],
+    "defaultProfile": "registered_customer"
+  },
+  {
     "tenantId": "ems",
     "key": "...",
-    "roles": ["chat", "documents:read", "documents:write", "documents:global"],
+    "roles": ["chat"],
     "allowedProfiles": ["accounting_client"],
     "defaultProfile": "accounting_client"
   }
@@ -59,6 +66,21 @@
 ```
 
 Публичният и регистрираният ключ на EasyStart използват един и същ `tenantId`, но разрешават различни профили. Така споделят публичните знания на платформата, без публичният ключ да може да активира регистрирания режим. Ключовете задължително остават различни.
+
+Само `knowledge-admin` има права за качване на знания. Ролята `documents:tenants` му позволява да зададе целевия `tenantId` в metadata. EasyStart и EMS са chat клиенти и нямат права за качване или промяна на документи. Ingestion ключът се пази единствено в защитения локален workspace и в production конфигурацията на chatbot API.
+
+Локалният файл `.env.ingestion` не се commit-ва:
+
+```ini
+CHATBOT_URL=https://chatbot.leon.bg
+CHATBOT_INGESTION_KEY=...
+```
+
+Качване и проследяване до статус `ready`:
+
+```bash
+npm run documents:upload -- --file <document.md> --metadata <metadata.json>
+```
 
 ## Заявка за чат
 

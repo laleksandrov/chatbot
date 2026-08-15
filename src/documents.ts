@@ -120,10 +120,21 @@ export class InMemoryDocumentRepository implements DocumentWorkRepository {
     this.documents.set(document.id, document);
   }
 
-  async findById(tenantId: string, id: string, canReadGlobal: boolean): Promise<DocumentRecord | null> {
+  async findById(
+    tenantId: string,
+    id: string,
+    canReadGlobal: boolean,
+    canReadAllTenants = false,
+  ): Promise<DocumentRecord | null> {
     const document = this.documents.get(id);
     if (!document) return null;
-    if (document.tenantId !== tenantId && !(canReadGlobal && document.accessLevel === "global")) return null;
+    if (
+      !canReadAllTenants &&
+      document.tenantId !== tenantId &&
+      !(canReadGlobal && document.accessLevel === "global")
+    ) {
+      return null;
+    }
     return document;
   }
 
@@ -394,11 +405,16 @@ export class PostgresDocumentRepository implements DocumentWorkRepository {
     );
   }
 
-  async findById(tenantId: string, id: string, canReadGlobal: boolean): Promise<DocumentRecord | null> {
+  async findById(
+    tenantId: string,
+    id: string,
+    canReadGlobal: boolean,
+    canReadAllTenants = false,
+  ): Promise<DocumentRecord | null> {
     const result = await this.pool.query<DocumentRow>(
       `SELECT * FROM documents
-       WHERE id = $1 AND (tenant_id = $2 OR ($3 = true AND access_level = 'global'))`,
-      [id, tenantId, canReadGlobal],
+       WHERE id = $1 AND ($4 = true OR tenant_id = $2 OR ($3 = true AND access_level = 'global'))`,
+      [id, tenantId, canReadGlobal, canReadAllTenants],
     );
     return result.rows[0] ? mapDocument(result.rows[0]) : null;
   }

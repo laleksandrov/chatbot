@@ -17,6 +17,7 @@ import {
 import { InMemoryChatQuotaStore } from "../src/quotas.js";
 
 const apiKey = "ems-test-key";
+const knowledgeAdminKey = "knowledge-admin-test-key";
 
 function multipartPayload(metadata: unknown, fileContent: string): { body: Buffer; contentType: string } {
   const boundary = "----chatbot-test-boundary";
@@ -66,6 +67,13 @@ describe("chatbot API", () => {
           key: apiKey,
           roles: ["chat", "documents:read", "documents:write", "documents:global"],
           allowedProfiles,
+          defaultProfile: "registered_customer",
+        },
+        {
+          tenantId: "knowledge-admin",
+          key: knowledgeAdminKey,
+          roles: ["documents:read", "documents:write", "documents:global", "documents:tenants"],
+          allowedProfiles: ["registered_customer"],
           defaultProfile: "registered_customer",
         },
       ],
@@ -221,6 +229,59 @@ describe("chatbot API", () => {
       tenantId: "ems",
       status: "accepted",
       originalFilename: "policy.txt",
+    });
+    await app.close();
+  });
+
+  it("allows only the central knowledge admin to upload and read another tenant's document", async () => {
+    const app = await buildApp();
+    const multipart = multipartPayload(
+      {
+        tenantId: "easystart",
+        title: "Проверена информация за регистрация",
+        category: "company-registration",
+        sourceType: "professional",
+        accessLevel: "tenant",
+        publiclyAccessible: true,
+        jurisdiction: "BG",
+      },
+      "Проверено съдържание",
+    );
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/admin/documents",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": multipart.contentType },
+      payload: multipart.body,
+    });
+    expect(rejected.statusCode).toBe(403);
+    expect(rejected.json().error.code).toBe("TENANT_MISMATCH");
+
+    const upload = await app.inject({
+      method: "POST",
+      url: "/v1/admin/documents",
+      headers: {
+        authorization: `Bearer ${knowledgeAdminKey}`,
+        "content-type": multipart.contentType,
+      },
+      payload: multipart.body,
+    });
+    expect(upload.statusCode).toBe(202);
+    expect(documents.documents.get(upload.json().documentId)).toMatchObject({
+      tenantId: "easystart",
+      publiclyAccessible: true,
+    });
+
+    const status = await app.inject({
+      method: "GET",
+      url: `/v1/admin/documents/${upload.json().documentId}`,
+      headers: { authorization: `Bearer ${knowledgeAdminKey}` },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      tenantId: "easystart",
+      publiclyAccessible: true,
+      status: "accepted",
     });
     await app.close();
   });

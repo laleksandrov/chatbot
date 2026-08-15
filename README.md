@@ -236,6 +236,8 @@ EMS е първият API клиент и първият tenant. Retrieval за 
 
 Частен документ никога не се добавя в глобалния scope по подразбиране. Повишаването му до глобален източник изисква отделно право `documents:global` и изрично зададено `accessLevel: "global"`.
 
+Клиентските приложения не качват знания. Централният оператор използва отделен credential с `documents:write` и `documents:tenants`, съхраняван само в защитения workspace. Само този credential може да зададе целеви `tenantId`; всеки друг API клиент получава `403 TENANT_MISMATCH` при опит да пише за чужд tenant.
+
 ### OpenAI Responses API и проверка на доказателствата
 
 Production provider използва `gpt-5.6-terra`, Responses API, structured outputs и File Search. Заявките са с `store: false`, а retrieval филтърът разрешава само:

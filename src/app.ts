@@ -271,7 +271,8 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       throw new HttpError(400, "INVALID_METADATA_JSON", "Полето metadata не е валиден JSON.");
     }
     const metadata = documentMetadataSchema.parse(metadataValue);
-    if (metadata.tenantId && metadata.tenantId !== auth.tenantId) {
+    const targetTenantId = metadata.tenantId ?? auth.tenantId;
+    if (targetTenantId !== auth.tenantId && !auth.roles.has("documents:tenants")) {
       throw new HttpError(403, "TENANT_MISMATCH", "tenantId не съответства на API клиента.");
     }
     if (metadata.accessLevel === "global" && !auth.roles.has("documents:global")) {
@@ -281,7 +282,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     let document;
     try {
       document = await ingestion.ingest({
-        tenantId: auth.tenantId,
+        tenantId: targetTenantId,
         metadata,
         filename,
         mimeType,
@@ -309,6 +310,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       auth.tenantId,
       id,
       auth.roles.has("documents:global"),
+      auth.roles.has("documents:tenants"),
     );
     if (!document) {
       throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Документът не е намерен.");
@@ -349,6 +351,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       auth.tenantId,
       id,
       auth.roles.has("documents:global"),
+      auth.roles.has("documents:tenants"),
     );
     if (!document) {
       throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Документът не е намерен.");

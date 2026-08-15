@@ -7,6 +7,7 @@ export const apiRoles = [
   "documents:read",
   "documents:write",
   "documents:global",
+  "documents:tenants",
 ] as const;
 
 export type ApiRole = (typeof apiRoles)[number];

@@ -17,6 +17,7 @@
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "documents:upload": "node --env-file-if-exists=.env.ingestion --import tsx scripts/upload-document.ts",
     "production:verify": "node --env-file-if-exists=.env --import tsx scripts/verify-production.ts"
   },
   "dependencies": {

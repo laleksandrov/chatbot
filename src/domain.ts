@@ -116,7 +116,12 @@ export interface DocumentRecord {
 
 export interface DocumentRepository {
   save(document: DocumentRecord): Promise<void>;
-  findById(tenantId: string, id: string, canReadGlobal: boolean): Promise<DocumentRecord | null>;
+  findById(
+    tenantId: string,
+    id: string,
+    canReadGlobal: boolean,
+    canReadAllTenants?: boolean,
+  ): Promise<DocumentRecord | null>;
   retryFailed(id: string): Promise<DocumentRecord | null>;
   updateStatus(id: string, status: DocumentStatus, error?: string): Promise<void>;
   close(): Promise<void>;
