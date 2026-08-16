@@ -25,8 +25,8 @@ const apiClientSchema = z
     tenantId: z.string().min(1),
     key: z.string().min(8),
     roles: z.array(z.enum(apiRoles)).min(1),
-    allowedProfiles: z.array(z.enum(assistantProfiles)).min(1).default(["accounting_client"]),
-    defaultProfile: z.enum(assistantProfiles).default("accounting_client"),
+    allowedProfiles: z.array(z.enum(assistantProfiles)).min(1).default(["registered_customer"]),
+    defaultProfile: z.enum(assistantProfiles).default("registered_customer"),
   })
   .refine((value) => value.allowedProfiles.includes(value.defaultProfile), {
     message: "defaultProfile must be included in allowedProfiles",

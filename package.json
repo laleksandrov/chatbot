@@ -19,6 +19,7 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "api-clients:import-env": "node --env-file-if-exists=.env --import tsx scripts/import-api-clients.ts",
     "documents:upload": "node --env-file-if-exists=.env.ingestion --import tsx scripts/upload-document.ts",
+    "documents:upload-batch": "node --env-file-if-exists=.env.ingestion --import tsx scripts/upload-document-batch.ts",
     "production:verify": "node --env-file-if-exists=.env --import tsx scripts/verify-production.ts"
   },
   "dependencies": {

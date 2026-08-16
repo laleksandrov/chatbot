@@ -41,9 +41,11 @@ describe("OpenAIChatProvider", () => {
       tools: Array<{ filters: unknown }>;
     };
     expect(request.instructions).toContain("цени на платформата");
+    expect(request.instructions).toContain("Използвай само факти");
+    expect(request.instructions).toContain("каноничния ценови документ");
     expect(request.instructions).toContain("нотариални и банкови такси");
-    expect(request.instructions).toContain("осигурителни вноски");
-    expect(request.instructions).toContain("ориентировъчен сценарий");
+    expect(request.instructions).toContain("счетоводното обслужване");
+    expect(request.instructions).toContain("Не прави разчети за осигурителни вноски");
     expect(request.instructions).toContain("не са пряко свързани");
     expect(request.tools[0]?.filters).toEqual({
       type: "or",
@@ -65,6 +67,46 @@ describe("OpenAIChatProvider", () => {
         },
       ],
     });
+  });
+
+  it("targets the canonical EasyStart pricing document for platform-cost questions", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Няма достатъчно данни.",
+        asOf: "2026-08-16",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "public_pre_registration",
+      message: "Колко ще ми струва да ползвам платформата?",
+    });
+
+    const request = parse.mock.calls[0]?.[0] as {
+      tools: Array<{ filters: unknown }>;
+    };
+    expect(request.tools[0]?.filters).toEqual({
+      type: "and",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "easystart" },
+            { key: "documentScope", type: "eq", value: "public" },
+          ],
+        },
+        { key: "category", type: "eq", value: "platform_pricing" },
+      ],
+    });
+    expect(result.status).toBe("insufficient_evidence");
+    expect(result.answer).toContain("регистрирате безплатно");
   });
 
   it("uses tenant-safe File Search and maps verified evidence", async () => {
@@ -126,11 +168,13 @@ describe("OpenAIChatProvider", () => {
     const request = parse.mock.calls[0]?.[0] as {
       model: string;
       store: boolean;
+      tool_choice: string;
       include: string[];
       tools: Array<{ filters: unknown; vector_store_ids: string[] }>;
     };
     expect(request.model).toBe("gpt-5.6-terra");
     expect(request.store).toBe(false);
+    expect(request.tool_choice).toBe("required");
     expect(request.include).toContain("file_search_call.results");
     expect(request.tools[0]?.vector_store_ids).toEqual(["vs_test"]);
     expect(request.tools[0]?.filters).toEqual({
@@ -185,40 +229,6 @@ describe("OpenAIChatProvider", () => {
     expect(result.status).toBe("insufficient_evidence");
     expect(result.sources).toEqual([]);
     expect(result.answer).not.toContain("Непроверен отговор");
-  });
-
-  it("scopes accounting-client retrieval to the exact organization", async () => {
-    const parse = vi.fn().mockResolvedValue({
-      output_parsed: {
-        status: "insufficient_evidence",
-        answer: "Няма достатъчно данни.",
-        asOf: "2026-08-13",
-        evidenceFileIds: [],
-        warnings: [],
-      },
-      output: [],
-    });
-    const provider = buildProvider(parse);
-
-    await provider.generate({
-      tenantId: "ems",
-      assistantProfile: "accounting_client",
-      externalOrganizationId: "company-42",
-      message: "Въпрос",
-    });
-
-    const request = parse.mock.calls[0]?.[0] as {
-      tools: Array<{ filters: { type: string; filters: unknown[] } }>;
-    };
-    expect(request.tools[0]?.filters.filters).toContainEqual({
-      type: "and",
-      filters: [
-        { key: "accessLevel", type: "eq", value: "tenant" },
-        { key: "tenantId", type: "eq", value: "ems" },
-        { key: "documentScope", type: "eq", value: "organization" },
-        { key: "organizationId", type: "eq", value: "company-42" },
-      ],
-    });
   });
 
   it("converts SDK failures to a provider availability error", async () => {

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
 import { FakeChatProvider } from "../src/chat.js";
@@ -52,7 +52,6 @@ describe("chatbot API", () => {
     allowedProfiles: AppConfig["apiClients"][number]["allowedProfiles"] = [
       "public_pre_registration",
       "registered_customer",
-      "accounting_client",
     ],
   ) {
     const config: AppConfig = {
@@ -350,7 +349,7 @@ describe("chatbot API", () => {
     await app.close();
   });
 
-  it("requires an organization for accounting clients", async () => {
+  it("rejects the removed accounting-client profile", async () => {
     const app = await buildApp();
     const response = await app.inject({
       method: "POST",
@@ -365,7 +364,6 @@ describe("chatbot API", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error.code).toBe("ORGANIZATION_REQUIRED");
     await app.close();
   });
 
@@ -385,42 +383,6 @@ describe("chatbot API", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe("ASSISTANT_PROFILE_FORBIDDEN");
-    await app.close();
-  });
-
-  it("passes the accounting organization to the provider", async () => {
-    const generate = vi.fn(async () => ({
-      status: "needs_clarification" as const,
-      answer: "Уточнете въпроса.",
-      asOf: "2026-08-13",
-      sources: [],
-      warnings: [],
-    }));
-    const app = await buildApp({ generate });
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/chat",
-      headers: { authorization: `Bearer ${apiKey}` },
-      payload: {
-        assistantProfile: "accounting_client",
-        channel: "platform",
-        externalUserId: "user-1",
-        externalOrganizationId: "company-42",
-        message: "Въпрос",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantProfile: "accounting_client",
-        externalOrganizationId: "company-42",
-      }),
-    );
-    expect(response.json().capabilities).toEqual({
-      humanEscalation: true,
-      organizationDocuments: true,
-    });
     await app.close();
   });
 

@@ -63,6 +63,16 @@ const globalKnowledgeFilter: FileSearchFilter = {
   ],
 };
 
+function isEasyStartPlatformPricingQuestion(input: ChatProviderInput): boolean {
+  if (input.tenantId.toLowerCase() !== "easystart") return false;
+  const question = input.message.toLocaleLowerCase("bg-BG");
+  const mentionsPrice = /(цена|цени|струва|струват|такса|такси|абонамент|абонаменти)/u.test(question);
+  const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|ползвам|ползване|използвам|използване)/u.test(
+    question,
+  );
+  return mentionsPrice && mentionsPlatform;
+}
+
 function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
   const policy = profilePolicy(input.assistantProfile);
 
@@ -74,6 +84,16 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
       { key: "documentScope", type: "eq", value: "public" },
     ],
   };
+
+  if (isEasyStartPlatformPricingQuestion(input)) {
+    return {
+      type: "and",
+      filters: [
+        publicTenantKnowledgeFilter,
+        { key: "category", type: "eq", value: "platform_pricing" },
+      ],
+    };
+  }
 
   if (!policy.allowsTenantDocuments && !policy.allowsOrganizationDocuments) {
     return policy.allowsPublicTenantDocuments
@@ -197,6 +217,23 @@ function safeInsufficientEvidence(answer: ProviderAnswer): ChatProviderResult {
   };
 }
 
+function withPublicRegistrationSuggestion(
+  result: ChatProviderResult,
+  profile: AssistantProfile,
+): ChatProviderResult {
+  if (
+    profile !== "public_pre_registration" ||
+    !["insufficient_evidence", "out_of_scope"].includes(result.status) ||
+    /регистри/u.test(result.answer)
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    answer: `${result.answer.trim()} Можете да се регистрирате безплатно в EasyStart, за да използвате разширения режим на асистента.`,
+  };
+}
+
 export class OpenAIChatProvider implements ChatProvider {
   private readonly client: OpenAI;
 
@@ -231,6 +268,7 @@ export class OpenAIChatProvider implements ChatProvider {
             filters: retrievalFilter(input),
           },
         ],
+        tool_choice: "required",
         include: ["file_search_call.results"],
       });
 
@@ -242,20 +280,19 @@ export class OpenAIChatProvider implements ChatProvider {
       const retrievedAt = new Date().toISOString();
       const retrievedResults = collectResults(response.output);
       const sources = verifiedSources(answer, retrievedResults, retrievedAt);
-      if (answer.status === "answered" && sources.length === 0) {
-        return safeInsufficientEvidence(answer);
-      }
-
-      const result: ChatProviderResult = {
-        status: answer.status,
-        answer: answer.answer,
-        asOf: answer.asOf,
-        sources,
-        warnings: answer.warnings,
-      };
+      let result: ChatProviderResult =
+        answer.status === "answered" && sources.length === 0
+          ? safeInsufficientEvidence(answer)
+          : {
+              status: answer.status,
+              answer: answer.answer,
+              asOf: answer.asOf,
+              sources,
+              warnings: answer.warnings,
+            };
       const policy = profilePolicy(input.assistantProfile);
       if (result.status === "human_escalation" && !policy.allowsHumanEscalation) {
-        return {
+        result = {
           ...result,
           status: "insufficient_evidence",
           answer:
@@ -265,7 +302,7 @@ export class OpenAIChatProvider implements ChatProvider {
           warnings: [...result.warnings, "Човешка ескалация не е разрешена за активния режим."],
         };
       }
-      return result;
+      return withPublicRegistrationSuggestion(result, input.assistantProfile);
     } catch (error) {
       if (error instanceof ChatProviderUnavailableError) throw error;
       throw new ChatProviderUnavailableError("OpenAI request failed", { cause: error });

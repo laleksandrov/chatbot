@@ -2,7 +2,7 @@
 
 Достъпът до `/admin` се определя единствено от `ADMIN_EMAIL` и `ADMIN_PASSWORD` във Forge environment. Тези стойности не се записват в PostgreSQL и не се показват в администраторския интерфейс.
 
-Таблицата `users` съдържа останалите човешки потребители, които се създават, активират и спират през администрацията. Те не могат да получават администраторски достъп. Таблицата `api_clients` съдържа машинните клиенти като EasyStart, EMS и локалния uploader за базата знания.
+Таблицата `users` съдържа останалите човешки потребители, които се създават, активират и спират през администрацията. Те не могат да получават администраторски достъп. Таблицата `api_clients` съдържа машинните клиенти като EasyStart и локалния uploader за базата знания.
 
 ## API права
 
@@ -12,7 +12,7 @@
 - `documents:global` — работа с глобалната база знания;
 - `documents:tenants` — работа от името на различни tenants.
 
-Всеки API клиент има отделен tenant, списък от права и разрешени assistant profiles. За EasyStart public и registered се създават различни клиенти и различни ключове. EMS получава само `chat` и `accounting_client`. Централният `knowledge-admin` ключ се пази локално в `.env.ingestion` и единствен той получава document правата.
+Всеки API клиент има отделен tenant, списък от права и разрешени assistant profiles. За EasyStart public и registered се създават различни клиенти и различни ключове. Активните режими са само `public_pre_registration` и `registered_customer`. Централният `knowledge-admin` ключ се пази локално в `.env.ingestion` и единствен той получава document правата.
 
 Новият API ключ се показва само веднъж. В PostgreSQL се пази SHA-256 хеш и кратък prefix за разпознаване. Паролите на обикновените потребители се пазят със scrypt. Администраторските сесии са 12-часови, с HttpOnly/SameSite cookie и CSRF token.
 
@@ -34,7 +34,7 @@ cd /home/forge/chatbot.leon.bg/current
 npm run api-clients:import-env
 ```
 
-Влезте в `https://chatbot.leon.bg/admin`, проверете клиентите и направете тест с EasyStart и EMS. Едва след успешния тест сменете Forge environment на:
+Влезте в `https://chatbot.leon.bg/admin`, проверете двата EasyStart клиента и направете тест и с двата режима. Едва след успешния тест сменете Forge environment на:
 
 ```dotenv
 API_CLIENTS_JSON=[]

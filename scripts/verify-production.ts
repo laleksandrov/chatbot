@@ -22,6 +22,7 @@ try {
     "004_public_platform_documents.sql",
     "005_access_management.sql",
     "006_environment_admin.sql",
+    "007_two_easy_start_profiles.sql",
   ]) {
     if (!migrations.includes(expected)) throw new Error(`Missing database migration: ${expected}`);
   }
