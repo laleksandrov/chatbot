@@ -63,12 +63,15 @@ const globalKnowledgeFilter: FileSearchFilter = {
   ],
 };
 
-function isEasyStartTenant(input: ChatProviderInput): boolean {
-  return input.tenantId.toLowerCase() === "easystart";
+function isEasyStartContext(input: ChatProviderInput): boolean {
+  return (
+    input.tenantId.toLowerCase() === "easystart" ||
+    input.assistantProfile === "public_pre_registration"
+  );
 }
 
 function isEasyStartPlatformPricingQuestion(input: ChatProviderInput): boolean {
-  if (!isEasyStartTenant(input)) return false;
+  if (!isEasyStartContext(input)) return false;
   const question = input.message.toLocaleLowerCase("bg-BG");
   const mentionsPrice = /(цена|цени|струва|струват|такса|такси|абонамент|абонаменти)/u.test(question);
   const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|ползвам|ползване|използвам|използване)/u.test(
@@ -78,7 +81,7 @@ function isEasyStartPlatformPricingQuestion(input: ChatProviderInput): boolean {
 }
 
 function isEasyStartPlatformCapabilitiesQuestion(input: ChatProviderInput): boolean {
-  if (!isEasyStartTenant(input)) return false;
+  if (!isEasyStartContext(input)) return false;
 
   const question = input.message.toLocaleLowerCase("bg-BG");
   const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|easy\s*start)/u.test(question);
@@ -103,11 +106,20 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
     ],
   };
 
+  const easyStartPublicKnowledgeFilter: FileSearchFilter = {
+    type: "and",
+    filters: [
+      { key: "accessLevel", type: "eq", value: "tenant" },
+      { key: "tenantId", type: "eq", value: "easystart" },
+      { key: "documentScope", type: "eq", value: "public" },
+    ],
+  };
+
   if (isEasyStartPlatformPricingQuestion(input)) {
     return {
       type: "and",
       filters: [
-        publicTenantKnowledgeFilter,
+        easyStartPublicKnowledgeFilter,
         { key: "category", type: "eq", value: "platform_pricing" },
       ],
     };
@@ -117,7 +129,7 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
     return {
       type: "and",
       filters: [
-        publicTenantKnowledgeFilter,
+        easyStartPublicKnowledgeFilter,
         { key: "category", type: "eq", value: "platform_capabilities" },
       ],
     };

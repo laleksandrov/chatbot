@@ -31,7 +31,7 @@ describe("OpenAIChatProvider", () => {
     const provider = buildProvider(parse);
 
     await provider.generate({
-      tenantId: "easystart",
+      tenantId: "easystart-public-client",
       assistantProfile: "public_pre_registration",
       message: "Какво прави тази платформа?",
     });
