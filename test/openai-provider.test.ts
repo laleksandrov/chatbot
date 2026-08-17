@@ -17,7 +17,7 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
 }
 
 describe("OpenAIChatProvider", () => {
-  it("targets the EasyStart capabilities document for the exact platform question", async () => {
+  it("targets the EasyStart capabilities document for a public capability intent", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
         status: "out_of_scope",
@@ -40,12 +40,12 @@ describe("OpenAIChatProvider", () => {
       instructions: string;
       tools: Array<{ filters: unknown }>;
     };
-    expect(request.instructions).toContain("цени на платформата");
+    expect(request.instructions).toContain("Публичният обхват включва");
     expect(request.instructions).toContain("Използвай само факти");
-    expect(request.instructions).toContain("каноничния ценови документ");
-    expect(request.instructions).toContain("нотариални и банкови такси");
+    expect(request.instructions).toContain("Каноничните материали на EasyStart");
+    expect(request.instructions).toContain("нотариални, банкови");
     expect(request.instructions).toContain("счетоводното обслужване");
-    expect(request.instructions).toContain("Не прави разчети за осигурителни вноски");
+    expect(request.instructions).toContain("Не прави конкретни разчети за осигурителни вноски");
     expect(request.instructions).toContain("не са пряко свързани");
     expect(request.tools[0]?.filters).toEqual({
       type: "and",
@@ -103,6 +103,120 @@ describe("OpenAIChatProvider", () => {
     expect(result.answer).toContain("регистрирате безплатно");
   });
 
+  it("uses both canonical EasyStart documents for a mixed intent", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Липсва информация.",
+        asOf: "2026-08-17",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "any-public-client-name",
+      assistantProfile: "public_pre_registration",
+      message: "Какво включва платформата и колко струва?",
+    });
+
+    const request = parse.mock.calls[0]?.[0] as { tools: Array<{ filters: unknown }> };
+    expect(request.tools[0]?.filters).toEqual({
+      type: "and",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "easystart" },
+            { key: "documentScope", type: "eq", value: "public" },
+          ],
+        },
+        {
+          key: "category",
+          type: "in",
+          value: ["platform_capabilities", "platform_pricing"],
+        },
+      ],
+    });
+  });
+
+  it("adds only global official sources to the canonical pricing document for external costs", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Липсва информация.",
+        asOf: "2026-08-17",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart-public-client",
+      assistantProfile: "public_pre_registration",
+      message: "Какви разходи и държавни такси има при учредяване на ООД?",
+    });
+
+    const request = parse.mock.calls[0]?.[0] as { tools: Array<{ filters: unknown }> };
+    expect(request.tools[0]?.filters).toEqual({
+      type: "or",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            {
+              type: "and",
+              filters: [
+                { key: "accessLevel", type: "eq", value: "tenant" },
+                { key: "tenantId", type: "eq", value: "easystart" },
+                { key: "documentScope", type: "eq", value: "public" },
+              ],
+            },
+            { key: "category", type: "eq", value: "platform_pricing" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "global" },
+            { key: "sourceType", type: "in", value: ["institutional", "legislation"] },
+          ],
+        },
+      ],
+    });
+  });
+
+  it.each([
+    "Колко осигуровки ще плащам?",
+    "Какъв данък дължа по тази конкретна сделка?",
+    "Как се осчетоводява тази фактура?",
+  ])("does not search or give a partial public answer for the restricted intent: %s", async (message) => {
+    const parse = vi.fn();
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart-public-client",
+      assistantProfile: "public_pre_registration",
+      message,
+      context: { asOf: "2026-08-17" },
+    });
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "out_of_scope",
+      asOf: "2026-08-17",
+      sources: [],
+      warnings: [],
+    });
+    expect(result.answer).toContain("безплатна регистрация");
+    expect(result.answer.match(/регистрац/giu)).toHaveLength(1);
+  });
+
   it("does not duplicate a registration invitation already present in the answer", async () => {
     const answer =
       "Можете да направите безплатна регистрация, за да получите достъп до разширения режим.";
@@ -126,6 +240,29 @@ describe("OpenAIChatProvider", () => {
 
     expect(result.answer).toBe(answer);
     expect(result.answer.match(/регистрац/giu)).toHaveLength(1);
+  });
+
+  it("removes internal search terminology from the user-facing answer", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer:
+          "RAG retrieval не намери категория platform_capabilities във файла easystart-platform-functions.md.",
+        asOf: "2026-08-17",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart-public-client",
+      assistantProfile: "public_pre_registration",
+      message: "Какво мога да правя тук?",
+    });
+
+    expect(result.answer).not.toMatch(/rag|retrieval|platform_capabilities|\.md/iu);
   });
 
   it("uses tenant-safe File Search and maps verified evidence", async () => {
@@ -218,10 +355,51 @@ describe("OpenAIChatProvider", () => {
           type: "and",
           filters: [
             { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "easystart" },
+            { key: "documentScope", type: "eq", value: "public" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
             { key: "tenantId", type: "eq", value: "ems" },
             { key: "documentScope", type: "eq", value: "tenant" },
           ],
         },
+      ],
+    });
+  });
+
+  it("does not apply public restrictions to the registered mode and keeps public EasyStart knowledge available", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Нужни са допълнителни данни.",
+        asOf: "2026-08-17",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart-registered-client",
+      assistantProfile: "registered_customer",
+      message: "Колко осигуровки ще плащам?",
+    });
+
+    expect(parse).toHaveBeenCalledOnce();
+    const request = parse.mock.calls[0]?.[0] as {
+      tools: Array<{ filters: { type: string; filters: unknown[] } }>;
+    };
+    expect(request.tools[0]?.filters.filters).toContainEqual({
+      type: "and",
+      filters: [
+        { key: "accessLevel", type: "eq", value: "tenant" },
+        { key: "tenantId", type: "eq", value: "easystart" },
+        { key: "documentScope", type: "eq", value: "public" },
       ],
     });
   });

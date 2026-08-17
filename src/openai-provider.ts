@@ -12,6 +12,7 @@ import {
   type SourceCitation,
 } from "./domain.js";
 import { profilePolicy, type AssistantProfile } from "./profiles.js";
+import { classifyPublicIntent, type PublicIntentDecision } from "./public-intent.js";
 
 const providerAnswerSchema = z.object({
   status: z.enum(answerStatuses),
@@ -53,6 +54,7 @@ function instructionsFor(profile: AssistantProfile): string {
 
 type FileSearchFilter =
   | { key: string; type: "eq" | "ne"; value: string }
+  | { key: string; type: "in"; value: string[] }
   | { type: "and" | "or"; filters: FileSearchFilter[] };
 
 const globalKnowledgeFilter: FileSearchFilter = {
@@ -63,38 +65,78 @@ const globalKnowledgeFilter: FileSearchFilter = {
   ],
 };
 
-function isEasyStartContext(input: ChatProviderInput): boolean {
-  return (
-    input.tenantId.toLowerCase() === "easystart" ||
-    input.assistantProfile === "public_pre_registration"
-  );
+const globalOfficialKnowledgeFilter: FileSearchFilter = {
+  type: "and",
+  filters: [
+    { key: "accessLevel", type: "eq", value: "global" },
+    { key: "sourceType", type: "in", value: ["institutional", "legislation"] },
+  ],
+};
+
+const easyStartPublicKnowledgeFilter: FileSearchFilter = {
+  type: "and",
+  filters: [
+    { key: "accessLevel", type: "eq", value: "tenant" },
+    { key: "tenantId", type: "eq", value: "easystart" },
+    { key: "documentScope", type: "eq", value: "public" },
+  ],
+};
+
+function canonicalEasyStartFilter(categories: string[]): FileSearchFilter {
+  return {
+    type: "and",
+    filters: [
+      easyStartPublicKnowledgeFilter,
+      categories.length === 1
+        ? { key: "category", type: "eq", value: categories[0] as string }
+        : { key: "category", type: "in", value: categories },
+    ],
+  };
 }
 
-function isEasyStartPlatformPricingQuestion(input: ChatProviderInput): boolean {
-  if (!isEasyStartContext(input)) return false;
-  const question = input.message.toLocaleLowerCase("bg-BG");
-  const mentionsPrice = /(цена|цени|струва|струват|такса|такси|абонамент|абонаменти)/u.test(question);
-  const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|ползвам|ползване|използвам|използване)/u.test(
-    question,
-  );
-  return mentionsPrice && mentionsPlatform;
+function publicIntentFilter(intent: PublicIntentDecision): FileSearchFilter | null {
+  const capabilities = canonicalEasyStartFilter(["platform_capabilities"]);
+  const pricing = canonicalEasyStartFilter(["platform_pricing"]);
+  const mixed = canonicalEasyStartFilter(["platform_capabilities", "platform_pricing"]);
+
+  switch (intent.group) {
+    case "platform_capabilities":
+      return capabilities;
+    case "platform_pricing":
+      return intent.includeOfficialSources
+        ? { type: "or", filters: [pricing, globalOfficialKnowledgeFilter] }
+        : pricing;
+    case "platform_mixed":
+      return intent.includeOfficialSources
+        ? { type: "or", filters: [mixed, globalOfficialKnowledgeFilter] }
+        : mixed;
+    case "external_registration_costs":
+      return { type: "or", filters: [pricing, globalOfficialKnowledgeFilter] };
+    case "restricted":
+    case "unknown":
+      return null;
+  }
 }
 
-function isEasyStartPlatformCapabilitiesQuestion(input: ChatProviderInput): boolean {
-  if (!isEasyStartContext(input)) return false;
-
-  const question = input.message.toLocaleLowerCase("bg-BG");
-  const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|easy\s*start)/u.test(question);
-  const asksAboutCapabilities =
-    /(какво\s+(?:прави|предлага)|какво\s+мога\s+да\s+правя|как\s+работи|какви\s+(?:функции|възможности|услуги)|за\s+какво\s+(?:служи|е)|функционалност(?:и)?|възможност(?:и)?)/u.test(
-      question,
-    );
-  const asksWhatElseIsOffered = /какво(?:\s+друго|\s+освен[^?]*)?\s+предлагате/u.test(question);
-
-  return (mentionsPlatform && asksAboutCapabilities) || asksWhatElseIsOffered;
+function publicIntentInstructions(intent: PublicIntentDecision): string {
+  const shared =
+    "Не споменавай пред потребителя вътрешното търсене, технически категории или имена на файлове. Каноничните материали на EasyStart имат предимство за твърдения за платформата и услугите ѝ.";
+  switch (intent.group) {
+    case "platform_capabilities":
+      return `${shared} Отговори пряко за функциите, процесите, ограниченията и достъпа до EasyStart.`;
+    case "platform_pricing":
+      return `${shared} Разграничи безплатната платформа, платените услуги и външните разходи. Използвай публикуваните правила за счетоводната услуга, когато въпросът е за нея.`;
+    case "platform_mixed":
+      return `${shared} Съчетай информацията за възможностите и цените, без да смесваш безплатните функции, платените услуги и външните разходи.`;
+    case "external_registration_costs":
+      return `${shared} Използвай EasyStart за структурата на услугата и само официалните източници за приложимите външни такси.`;
+    case "restricted":
+    case "unknown":
+      return shared;
+  }
 }
 
-function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
+function retrievalFilter(input: ChatProviderInput, publicIntent?: PublicIntentDecision): FileSearchFilter {
   const policy = profilePolicy(input.assistantProfile);
 
   const publicTenantKnowledgeFilter: FileSearchFilter = {
@@ -106,33 +148,12 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
     ],
   };
 
-  const easyStartPublicKnowledgeFilter: FileSearchFilter = {
-    type: "and",
-    filters: [
-      { key: "accessLevel", type: "eq", value: "tenant" },
-      { key: "tenantId", type: "eq", value: "easystart" },
-      { key: "documentScope", type: "eq", value: "public" },
-    ],
-  };
-
-  if (isEasyStartPlatformPricingQuestion(input)) {
-    return {
-      type: "and",
-      filters: [
-        easyStartPublicKnowledgeFilter,
-        { key: "category", type: "eq", value: "platform_pricing" },
-      ],
-    };
-  }
-
-  if (isEasyStartPlatformCapabilitiesQuestion(input)) {
-    return {
-      type: "and",
-      filters: [
-        easyStartPublicKnowledgeFilter,
-        { key: "category", type: "eq", value: "platform_capabilities" },
-      ],
-    };
+  if (input.assistantProfile === "public_pre_registration" && publicIntent) {
+    const intentFilter = publicIntentFilter(publicIntent);
+    if (intentFilter) return intentFilter;
+    if (publicIntent.group === "unknown") {
+      return { type: "or", filters: [globalKnowledgeFilter, easyStartPublicKnowledgeFilter] };
+    }
   }
 
   if (!policy.allowsTenantDocuments && !policy.allowsOrganizationDocuments) {
@@ -150,11 +171,16 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
     ],
   };
   if (policy.allowsTenantDocuments) {
+    const canonicalPublicKnowledge =
+      policy.allowsPublicTenantDocuments && input.tenantId.toLowerCase() !== "easystart"
+        ? [easyStartPublicKnowledgeFilter]
+        : [];
     return {
       type: "or",
       filters: [
         globalKnowledgeFilter,
         ...(policy.allowsPublicTenantDocuments ? [publicTenantKnowledgeFilter] : []),
+        ...canonicalPublicKnowledge,
         tenantKnowledgeFilter,
       ],
     };
@@ -253,8 +279,16 @@ function safeInsufficientEvidence(answer: ProviderAnswer): ChatProviderResult {
     answer: "Не разполагам с достатъчно проверими източници, за да дам надежден отговор.",
     asOf: answer.asOf,
     sources: [],
-    warnings: [...answer.warnings, "Моделът не посочи валиден retrieval източник."],
+    warnings: [...answer.warnings, "Не беше намерен достатъчно надежден източник."],
   };
+}
+
+function withoutInternalTechnicalDetails(result: ChatProviderResult): ChatProviderResult {
+  const answer = result.answer
+    .replaceAll(/\b(?:file\s+search|retrieval|rag|vector[ -]store)\b/giu, "достъпните източници")
+    .replaceAll(/platform_(?:capabilities|pricing)/giu, "публичната информация")
+    .replaceAll(/[^\s]+\.(?:md|txt|pdf|docx|html)\b/giu, "публичния източник");
+  return answer === result.answer ? result : { ...result, answer };
 }
 
 function withPublicRegistrationSuggestion(
@@ -282,11 +316,28 @@ export class OpenAIChatProvider implements ChatProvider {
   }
 
   async generate(input: ChatProviderInput): Promise<ChatProviderResult> {
+    const publicIntent =
+      input.assistantProfile === "public_pre_registration"
+        ? classifyPublicIntent(input.message)
+        : undefined;
+    if (publicIntent?.group === "restricted") {
+      return {
+        status: "out_of_scope",
+        answer:
+          "Тази тема е достъпна след безплатна регистрация в EasyStart, когато асистентът може да работи с необходимия допълнителен контекст.",
+        asOf: input.context?.asOf ?? new Date().toISOString().slice(0, 10),
+        sources: [],
+        warnings: [],
+      };
+    }
+
     try {
       const response = await this.client.responses.parse({
         model: this.options.model,
         store: false,
-        instructions: instructionsFor(input.assistantProfile),
+        instructions: publicIntent
+          ? `${instructionsFor(input.assistantProfile)}\n\n${publicIntentInstructions(publicIntent)}`
+          : instructionsFor(input.assistantProfile),
         input: JSON.stringify({
           tenantId: input.tenantId,
           assistantProfile: input.assistantProfile,
@@ -305,7 +356,7 @@ export class OpenAIChatProvider implements ChatProvider {
             type: "file_search",
             vector_store_ids: [this.options.vectorStoreId],
             max_num_results: this.options.maxResults,
-            filters: retrievalFilter(input),
+            filters: retrievalFilter(input, publicIntent),
           },
         ],
         tool_choice: "required",
@@ -342,7 +393,10 @@ export class OpenAIChatProvider implements ChatProvider {
           warnings: [...result.warnings, "Човешка ескалация не е разрешена за активния режим."],
         };
       }
-      return withPublicRegistrationSuggestion(result, input.assistantProfile);
+      return withPublicRegistrationSuggestion(
+        withoutInternalTechnicalDetails(result),
+        input.assistantProfile,
+      );
     } catch (error) {
       if (error instanceof ChatProviderUnavailableError) throw error;
       throw new ChatProviderUnavailableError("OpenAI request failed", { cause: error });
