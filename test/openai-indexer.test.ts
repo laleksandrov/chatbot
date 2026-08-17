@@ -93,9 +93,10 @@ describe("OpenAIDocumentIndexer", () => {
   it("reuses a previously uploaded file", async () => {
     const createFile = vi.fn();
     const retrieve = vi.fn().mockResolvedValue(vectorFile("completed"));
+    const update = vi.fn().mockResolvedValue(vectorFile("completed"));
     const client = {
       files: { create: createFile },
-      vectorStores: { files: { retrieve, create: vi.fn() } },
+      vectorStores: { files: { retrieve, create: vi.fn(), update } },
     } as unknown as OpenAI;
     const indexer = new OpenAIDocumentIndexer({
       apiKey: "test-key",
@@ -112,6 +113,15 @@ describe("OpenAIDocumentIndexer", () => {
       onFileUploaded: vi.fn(),
     });
     expect(createFile).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith("file_1", {
+      vector_store_id: "vs_1",
+      attributes: expect.objectContaining({
+        tenantId: "ems",
+        category: "policy",
+        accessLevel: "tenant",
+        documentScope: "tenant",
+      }),
+    });
   });
 
   it("serializes date objects returned by PostgreSQL as vector-store attributes", async () => {

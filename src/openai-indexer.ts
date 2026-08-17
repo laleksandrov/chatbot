@@ -94,10 +94,12 @@ export class OpenAIDocumentIndexer implements DocumentIndexer {
     }
 
     let vectorFile: VectorStoreFile | undefined;
+    let reusedVectorFile = false;
     try {
       vectorFile = await this.client.vectorStores.files.retrieve(openAiFileId, {
         vector_store_id: this.options.vectorStoreId,
       });
+      reusedVectorFile = true;
     } catch (error) {
       if (errorStatus(error) !== 404) throw error;
     }
@@ -115,6 +117,12 @@ export class OpenAIDocumentIndexer implements DocumentIndexer {
     }
 
     const completed = await this.waitUntilReady(vectorFile);
+    if (reusedVectorFile) {
+      await this.client.vectorStores.files.update(openAiFileId, {
+        vector_store_id: this.options.vectorStoreId,
+        attributes: attributesFor(input.document),
+      });
+    }
     return {
       openAiFileId,
       vectorStoreId: this.options.vectorStoreId,
