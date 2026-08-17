@@ -63,14 +63,32 @@ const globalKnowledgeFilter: FileSearchFilter = {
   ],
 };
 
+function isEasyStartTenant(input: ChatProviderInput): boolean {
+  return input.tenantId.toLowerCase() === "easystart";
+}
+
 function isEasyStartPlatformPricingQuestion(input: ChatProviderInput): boolean {
-  if (input.tenantId.toLowerCase() !== "easystart") return false;
+  if (!isEasyStartTenant(input)) return false;
   const question = input.message.toLocaleLowerCase("bg-BG");
   const mentionsPrice = /(цена|цени|струва|струват|такса|такси|абонамент|абонаменти)/u.test(question);
   const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|ползвам|ползване|използвам|използване)/u.test(
     question,
   );
   return mentionsPrice && mentionsPlatform;
+}
+
+function isEasyStartPlatformCapabilitiesQuestion(input: ChatProviderInput): boolean {
+  if (!isEasyStartTenant(input)) return false;
+
+  const question = input.message.toLocaleLowerCase("bg-BG");
+  const mentionsPlatform = /(платформа(?:та)?|easystart|изистарт|easy\s*start)/u.test(question);
+  const asksAboutCapabilities =
+    /(какво\s+(?:прави|предлага)|какво\s+мога\s+да\s+правя|как\s+работи|какви\s+(?:функции|възможности|услуги)|за\s+какво\s+(?:служи|е)|функционалност(?:и)?|възможност(?:и)?)/u.test(
+      question,
+    );
+  const asksWhatElseIsOffered = /какво(?:\s+друго|\s+освен[^?]*)?\s+предлагате/u.test(question);
+
+  return (mentionsPlatform && asksAboutCapabilities) || asksWhatElseIsOffered;
 }
 
 function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
@@ -91,6 +109,16 @@ function retrievalFilter(input: ChatProviderInput): FileSearchFilter {
       filters: [
         publicTenantKnowledgeFilter,
         { key: "category", type: "eq", value: "platform_pricing" },
+      ],
+    };
+  }
+
+  if (isEasyStartPlatformCapabilitiesQuestion(input)) {
+    return {
+      type: "and",
+      filters: [
+        publicTenantKnowledgeFilter,
+        { key: "category", type: "eq", value: "platform_capabilities" },
       ],
     };
   }
@@ -224,7 +252,7 @@ function withPublicRegistrationSuggestion(
   if (
     profile !== "public_pre_registration" ||
     !["insufficient_evidence", "out_of_scope"].includes(result.status) ||
-    /регистри/u.test(result.answer)
+    /(?:регистри|регистрац)/iu.test(result.answer)
   ) {
     return result;
   }

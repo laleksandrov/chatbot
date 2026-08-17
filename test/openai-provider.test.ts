@@ -17,7 +17,7 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
 }
 
 describe("OpenAIChatProvider", () => {
-  it("constrains the public profile to EasyStart registration and cost planning", async () => {
+  it("targets the EasyStart capabilities document for the exact platform question", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
         status: "out_of_scope",
@@ -33,7 +33,7 @@ describe("OpenAIChatProvider", () => {
     await provider.generate({
       tenantId: "easystart",
       assistantProfile: "public_pre_registration",
-      message: "Какво мога да правя в платформата?",
+      message: "Какво прави тази платформа?",
     });
 
     const request = parse.mock.calls[0]?.[0] as {
@@ -48,15 +48,8 @@ describe("OpenAIChatProvider", () => {
     expect(request.instructions).toContain("Не прави разчети за осигурителни вноски");
     expect(request.instructions).toContain("не са пряко свързани");
     expect(request.tools[0]?.filters).toEqual({
-      type: "or",
+      type: "and",
       filters: [
-        {
-          type: "and",
-          filters: [
-            { key: "accessLevel", type: "eq", value: "global" },
-            { key: "sourceType", type: "ne", value: "internal" },
-          ],
-        },
         {
           type: "and",
           filters: [
@@ -65,6 +58,7 @@ describe("OpenAIChatProvider", () => {
             { key: "documentScope", type: "eq", value: "public" },
           ],
         },
+        { key: "category", type: "eq", value: "platform_capabilities" },
       ],
     });
   });
@@ -107,6 +101,31 @@ describe("OpenAIChatProvider", () => {
     });
     expect(result.status).toBe("insufficient_evidence");
     expect(result.answer).toContain("регистрирате безплатно");
+  });
+
+  it("does not duplicate a registration invitation already present in the answer", async () => {
+    const answer =
+      "Можете да направите безплатна регистрация, за да получите достъп до разширения режим.";
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer,
+        asOf: "2026-08-17",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "public_pre_registration",
+      message: "Какво прави тази платформа?",
+    });
+
+    expect(result.answer).toBe(answer);
+    expect(result.answer.match(/регистрац/giu)).toHaveLength(1);
   });
 
   it("uses tenant-safe File Search and maps verified evidence", async () => {
