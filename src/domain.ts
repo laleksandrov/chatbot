@@ -21,6 +21,21 @@ export interface SourceCitation {
 export interface ChatContext {
   jurisdiction?: string;
   asOf?: string;
+  registrationProgress?: {
+    currentStep: number;
+    completedSteps: number[];
+    commercialRegister?: Record<string, string | number | boolean | null> | undefined;
+    companyCopy?: {
+      has_source_company?: boolean | undefined;
+      source_company_uic?: string | null | undefined;
+    } | undefined;
+    copiedCompanyDetails?: Record<string, string> | undefined;
+    activityDescription?: string | null | undefined;
+  };
+}
+
+export interface RegistrationUpdate {
+  activityDescription?: string;
 }
 
 export interface ChatProviderInput {
@@ -37,6 +52,7 @@ export interface ChatProviderResult {
   asOf: string;
   sources: SourceCitation[];
   warnings: string[];
+  registrationUpdate?: RegistrationUpdate;
 }
 
 export interface ChatProvider {

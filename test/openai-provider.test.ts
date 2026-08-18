@@ -17,6 +17,53 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
 }
 
 describe("OpenAIChatProvider", () => {
+  it("guides the activity step and returns a structured full replacement without requiring evidence", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "answered",
+        answer: "Добавих разработката на софтуер и запазих общата формулировка.",
+        asOf: "2026-08-18",
+        evidenceFileIds: [],
+        warnings: [],
+        registrationUpdate: {
+          activityDescription: "Консултантска дейност, разработка и поддръжка на софтуер.",
+        },
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Добави и разработка на софтуер.",
+      context: {
+        jurisdiction: "BG",
+        registrationProgress: {
+          currentStep: 4,
+          completedSteps: [1, 2, 3],
+          copiedCompanyDetails: { activity: "Консултантска дейност" },
+          activityDescription: "Консултантска дейност",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "answered",
+      sources: [],
+      registrationUpdate: {
+        activityDescription: "Консултантска дейност, разработка и поддръжка на софтуер.",
+      },
+    });
+    const request = parse.mock.calls[0]?.[0] as { instructions: string; input: string };
+    expect(request.instructions).toContain("Активна е стъпката „Описание на дейността“");
+    expect(request.instructions).toContain("целия готов текст");
+    expect(JSON.parse(request.input).registrationProgress).toMatchObject({
+      currentStep: 4,
+      activityDescription: "Консултантска дейност",
+    });
+  });
+
   it("targets the EasyStart capabilities document for a public capability intent", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {

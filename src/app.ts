@@ -25,6 +25,20 @@ import { landingPageHtml } from "./landing.js";
 import { assistantProfiles, profilePolicy } from "./profiles.js";
 import type { ChatQuotaStore } from "./quotas.js";
 
+const registrationProgressSchema = z.object({
+  currentStep: z.number().int().min(1).max(20),
+  completedSteps: z.array(z.number().int().min(1).max(20)).max(20),
+  commercialRegister: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  companyCopy: z
+    .object({
+      has_source_company: z.boolean().optional(),
+      source_company_uic: z.string().regex(/^(?:\d{9}|\d{13})$/).nullable().optional(),
+    })
+    .optional(),
+  copiedCompanyDetails: z.record(z.string(), z.string().max(5_000)).optional(),
+  activityDescription: z.string().max(5_000).nullable().optional(),
+});
+
 const chatRequestSchema = z.object({
   tenantId: z.string().min(1).optional(),
   assistantProfile: z.enum(assistantProfiles).optional(),
@@ -37,6 +51,7 @@ const chatRequestSchema = z.object({
     .object({
       jurisdiction: z.string().min(2).max(20).optional(),
       asOf: z.iso.date().optional(),
+      registrationProgress: registrationProgressSchema.optional(),
     })
     .optional(),
 });
@@ -207,6 +222,9 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
             ? {}
             : { jurisdiction: body.context.jurisdiction }),
           ...(body.context.asOf === undefined ? {} : { asOf: body.context.asOf }),
+          ...(body.context.registrationProgress === undefined
+            ? {}
+            : { registrationProgress: body.context.registrationProgress }),
         }
       : undefined;
     const result = await dependencies.chatProvider.generate({

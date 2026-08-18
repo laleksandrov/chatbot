@@ -20,6 +20,9 @@ const providerAnswerSchema = z.object({
   asOf: z.iso.date(),
   evidenceFileIds: z.array(z.string()),
   warnings: z.array(z.string()),
+  registrationUpdate: z.object({
+    activityDescription: z.string().max(5_000).nullable(),
+  }),
 });
 
 type ProviderAnswer = z.infer<typeof providerAnswerSchema>;
@@ -38,6 +41,17 @@ const baseDeveloperInstructions = `
 8. При въпрос извън разрешения бизнес обхват използвай out_of_scope.
 9. В evidenceFileIds включи само file_id стойности на retrieval резултатите, които пряко подкрепят отговора.
 10. Не приемай професионален коментар или вътрешна процедура за равностойни на нормативен акт.
+11. Винаги върни registrationUpdate.activityDescription. Използвай null, освен когато правилата за активната регистрационна стъпка изрично изискват пълна нова стойност.
+`.trim();
+
+const activityDescriptionInstructions = `
+Активна е стъпката „Описание на дейността“ в EasyStart.
+- Помагай на потребителя да формулира ясен и достатъчно широк предмет на дейност. Обяснявай накратко защо предлагаш промяна и задавай по един конкретен уточняващ въпрос, когато липсва съществена информация.
+- Текущият текст е в registrationProgress.activityDescription. Ако той липсва, използвай копирания текст от registrationProgress.copiedCompanyDetails.activity като начална основа.
+- Не твърди, че конкретна дейност е свободна, лицензирана или допустима без подкрепящ източник. При възможна регулирана дейност първо изясни намерението и посочи необходимостта от проверка.
+- Когато потребителят ясно поиска промяна или одобри твое предложение, върни целия готов текст в registrationUpdate.activityDescription, а не само разликата. В отговора кажи накратко какво промени.
+- Когато само даваш насока, задаваш въпрос или потребителят още не е одобрил промяна, върни registrationUpdate.activityDescription=null.
+- Не отбелязвай стъпката като завършена. Потребителят я потвърждава отделно в EasyStart.
 `.trim();
 
 function instructionsFor(profile: AssistantProfile): string {
@@ -50,6 +64,13 @@ function instructionsFor(profile: AssistantProfile): string {
       ? "В този режим human_escalation е разрешен."
       : "В този режим human_escalation не е достъпен; обясни ограничението без да обещаваш човешка намеса.",
   ].join("\n\n");
+}
+
+function registrationInstructions(input: ChatProviderInput): string | null {
+  return input.assistantProfile === "registered_customer" &&
+    input.context?.registrationProgress?.currentStep === 4
+    ? activityDescriptionInstructions
+    : null;
 }
 
 type FileSearchFilter =
@@ -335,9 +356,13 @@ export class OpenAIChatProvider implements ChatProvider {
       const response = await this.client.responses.parse({
         model: this.options.model,
         store: false,
-        instructions: publicIntent
-          ? `${instructionsFor(input.assistantProfile)}\n\n${publicIntentInstructions(publicIntent)}`
-          : instructionsFor(input.assistantProfile),
+        instructions: [
+          instructionsFor(input.assistantProfile),
+          publicIntent ? publicIntentInstructions(publicIntent) : null,
+          registrationInstructions(input),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         input: JSON.stringify({
           tenantId: input.tenantId,
           assistantProfile: input.assistantProfile,
@@ -345,6 +370,7 @@ export class OpenAIChatProvider implements ChatProvider {
           question: input.message,
           jurisdiction: input.context?.jurisdiction ?? "BG",
           asOf: input.context?.asOf ?? new Date().toISOString().slice(0, 10),
+          registrationProgress: input.context?.registrationProgress,
         }),
         reasoning: { effort: this.options.reasoningEffort },
         text: {
@@ -371,8 +397,13 @@ export class OpenAIChatProvider implements ChatProvider {
       const retrievedAt = new Date().toISOString();
       const retrievedResults = collectResults(response.output);
       const sources = verifiedSources(answer, retrievedResults, retrievedAt);
+      const activityDescription = answer.registrationUpdate?.activityDescription?.trim() || null;
+      const hasActivityUpdate =
+        input.assistantProfile === "registered_customer" &&
+        input.context?.registrationProgress?.currentStep === 4 &&
+        activityDescription !== null;
       let result: ChatProviderResult =
-        answer.status === "answered" && sources.length === 0
+        answer.status === "answered" && sources.length === 0 && !hasActivityUpdate
           ? safeInsufficientEvidence(answer)
           : {
               status: answer.status,
@@ -380,6 +411,9 @@ export class OpenAIChatProvider implements ChatProvider {
               asOf: answer.asOf,
               sources,
               warnings: answer.warnings,
+              ...(hasActivityUpdate
+                ? { registrationUpdate: { activityDescription } }
+                : {}),
             };
       const policy = profilePolicy(input.assistantProfile);
       if (result.status === "human_escalation" && !policy.allowsHumanEscalation) {

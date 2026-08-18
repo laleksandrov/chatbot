@@ -232,6 +232,66 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("passes registration progress to the provider and returns structured registration updates", async () => {
+    const calls: Parameters<ChatProvider["generate"]>[0][] = [];
+    const provider: ChatProvider = {
+      async generate(input) {
+        calls.push(input);
+        return {
+          status: "answered",
+          answer: "Добавих разработката на софтуер.",
+          asOf: "2026-08-18",
+          sources: [],
+          warnings: [],
+          registrationUpdate: {
+            activityDescription: "Консултантска дейност и разработка на софтуер.",
+          },
+        };
+      },
+    };
+    const app = await buildApp(provider);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        channel: "easystart-web",
+        externalUserId: "easystart-user-1",
+        message: "Добави разработка на софтуер.",
+        context: {
+          jurisdiction: "BG",
+          registrationProgress: {
+            currentStep: 4,
+            completedSteps: [1, 2, 3],
+            companyCopy: {
+              has_source_company: true,
+              source_company_uic: "202403817",
+              source_company: { should_be_stripped: true },
+            },
+            copiedCompanyDetails: { activity: "Консултантска дейност" },
+            activityDescription: "Консултантска дейност",
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]?.context?.registrationProgress).toEqual({
+      currentStep: 4,
+      completedSteps: [1, 2, 3],
+      companyCopy: {
+        has_source_company: true,
+        source_company_uic: "202403817",
+      },
+      copiedCompanyDetails: { activity: "Консултантска дейност" },
+      activityDescription: "Консултантска дейност",
+    });
+    expect(response.json().registrationUpdate).toEqual({
+      activityDescription: "Консултантска дейност и разработка на софтуер.",
+    });
+    await app.close();
+  });
+
   it("allows only the central knowledge admin to upload and read another tenant's document", async () => {
     const app = await buildApp();
     const multipart = multipartPayload(
