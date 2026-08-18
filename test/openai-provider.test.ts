@@ -17,6 +17,46 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
 }
 
 describe("OpenAIChatProvider", () => {
+  it("brainstorms company names on step five without claiming registry availability", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "answered",
+        answer: "Ето три идеи: Кодора, Софтика и НоваЛогика. Преди избор ще проверим името в Търговския регистър.",
+        asOf: "2026-08-18",
+        evidenceFileIds: [],
+        warnings: [],
+        registrationUpdate: { activityDescription: null },
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Предложи ми кратки и модерни имена.",
+      context: {
+        jurisdiction: "BG",
+        registrationProgress: {
+          currentStep: 5,
+          completedSteps: [1, 2, 3, 4],
+          activityDescription: "Разработка и поддръжка на софтуер.",
+        },
+      },
+    });
+
+    expect(result.status).toBe("answered");
+    expect(result.sources).toEqual([]);
+    expect(result.registrationUpdate).toBeUndefined();
+    const request = parse.mock.calls[0]?.[0] as { instructions: string; input: string };
+    expect(request.instructions).toContain("Активна е стъпката „Избор на име“");
+    expect(request.instructions).toContain("Не твърди, че предложено име е свободно");
+    expect(JSON.parse(request.input).registrationProgress).toMatchObject({
+      currentStep: 5,
+      activityDescription: "Разработка и поддръжка на софтуер.",
+    });
+  });
+
   it("guides the activity step and returns a structured full replacement without requiring evidence", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {

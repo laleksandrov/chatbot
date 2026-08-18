@@ -54,6 +54,15 @@ const activityDescriptionInstructions = `
 - Не отбелязвай стъпката като завършена. Потребителят я потвърждава отделно в EasyStart.
 `.trim();
 
+const companyNameInstructions = `
+Активна е стъпката „Избор на име“ в EasyStart.
+- Съдействай с конкретни идеи за име, съобразени с предмета на дейност от registrationProgress.activityDescription и предпочитанията на потребителя.
+- Ако предпочитанията не са ясни, попитай за желан стил, език, ключова дума или дали името да подсказва дейността. Задавай по един кратък, полезен въпрос.
+- При поискани идеи предложи разнообразни и лесни за произнасяне варианти и накратко обясни логиката на най-силните предложения.
+- Не твърди, че предложено име е свободно, уникално, запазено или допустимо без действителна проверка. Ясно разграничи идеите от последващата проверка в Търговския регистър.
+- Не променяй registrationUpdate.activityDescription на тази стъпка; върни null.
+`.trim();
+
 function instructionsFor(profile: AssistantProfile): string {
   const policy = profilePolicy(profile);
   return [
@@ -67,10 +76,16 @@ function instructionsFor(profile: AssistantProfile): string {
 }
 
 function registrationInstructions(input: ChatProviderInput): string | null {
-  return input.assistantProfile === "registered_customer" &&
-    input.context?.registrationProgress?.currentStep === 4
-    ? activityDescriptionInstructions
-    : null;
+  if (input.assistantProfile !== "registered_customer") return null;
+
+  switch (input.context?.registrationProgress?.currentStep) {
+    case 4:
+      return activityDescriptionInstructions;
+    case 5:
+      return companyNameInstructions;
+    default:
+      return null;
+  }
 }
 
 type FileSearchFilter =
@@ -402,8 +417,11 @@ export class OpenAIChatProvider implements ChatProvider {
         input.assistantProfile === "registered_customer" &&
         input.context?.registrationProgress?.currentStep === 4 &&
         activityDescription !== null;
+      const isCompanyNameGuidance =
+        input.assistantProfile === "registered_customer" &&
+        input.context?.registrationProgress?.currentStep === 5;
       let result: ChatProviderResult =
-        answer.status === "answered" && sources.length === 0 && !hasActivityUpdate
+        answer.status === "answered" && sources.length === 0 && !hasActivityUpdate && !isCompanyNameGuidance
           ? safeInsufficientEvidence(answer)
           : {
               status: answer.status,
