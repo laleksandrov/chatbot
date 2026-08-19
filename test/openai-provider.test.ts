@@ -51,6 +51,7 @@ describe("OpenAIChatProvider", () => {
     const request = parse.mock.calls[0]?.[0] as { instructions: string; input: string };
     expect(request.instructions).toContain("Активна е стъпката „Избор на име“");
     expect(request.instructions).toContain("Не твърди, че предложено име е свободно");
+    expect(request.instructions).toContain("registrationUpdate.companyName НЕ МОЖЕ да бъде null");
     expect(JSON.parse(request.input).registrationProgress).toMatchObject({
       currentStep: 5,
       activityDescription: "Разработка и поддръжка на софтуер.",
