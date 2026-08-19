@@ -22,6 +22,7 @@ const providerAnswerSchema = z.object({
   warnings: z.array(z.string()),
   registrationUpdate: z.object({
     activityDescription: z.string().max(5_000).nullable(),
+    companyName: z.string().max(200).nullable(),
   }),
 });
 
@@ -41,7 +42,7 @@ const baseDeveloperInstructions = `
 8. При въпрос извън разрешения бизнес обхват използвай out_of_scope.
 9. В evidenceFileIds включи само file_id стойности на retrieval резултатите, които пряко подкрепят отговора.
 10. Не приемай професионален коментар или вътрешна процедура за равностойни на нормативен акт.
-11. Винаги върни registrationUpdate.activityDescription. Използвай null, освен когато правилата за активната регистрационна стъпка изрично изискват пълна нова стойност.
+11. Винаги върни registrationUpdate.activityDescription и registrationUpdate.companyName. Използвай null, освен когато правилата за активната регистрационна стъпка изрично изискват пълна нова стойност.
 `.trim();
 
 const activityDescriptionInstructions = `
@@ -52,6 +53,7 @@ const activityDescriptionInstructions = `
 - Когато потребителят ясно поиска промяна или одобри твое предложение, върни целия готов текст в registrationUpdate.activityDescription, а не само разликата. В отговора кажи накратко какво промени.
 - Когато само даваш насока, задаваш въпрос или потребителят още не е одобрил промяна, върни registrationUpdate.activityDescription=null.
 - Не отбелязвай стъпката като завършена. Потребителят я потвърждава отделно в EasyStart.
+- Върни registrationUpdate.companyName=null.
 `.trim();
 
 const companyNameInstructions = `
@@ -60,7 +62,17 @@ const companyNameInstructions = `
 - Ако предпочитанията не са ясни, попитай за желан стил, език, ключова дума или дали името да подсказва дейността. Задавай по един кратък, полезен въпрос.
 - При поискани идеи предложи разнообразни и лесни за произнасяне варианти и накратко обясни логиката на най-силните предложения.
 - Не твърди, че предложено име е свободно, уникално, запазено или допустимо без действителна проверка. Ясно разграничи идеите от последващата проверка в Търговския регистър.
-- Не променяй registrationUpdate.activityDescription на тази стъпка; върни null.
+- Когато потребителят ясно избере или одобри конкретно име, върни точното пълно име в registrationUpdate.companyName. Не включвай правната форма „ЕООД“ или „ООД“ в стойността. При идеи или уточняващ въпрос върни null.
+- Върни registrationUpdate.activityDescription=null. EasyStart приключва стъпката само след отделно потвърждение от потребителя.
+`.trim();
+
+const companyNameCheckInstructions = `
+Активна е стъпката „Проверка на името“ в EasyStart. Избраното име е в registrationProgress.companyName.
+- Насочи потребителя към официалната справка „Права върху фирма/наименование“ в ТРРЮЛНЦ и обясни да потърси точното име и близки изписвания.
+- Обясни спокойно рисковете от идентично или сходно име и от запазено наименование. Разграничи предварителната справка от окончателната преценка при вписването.
+- Не твърди, че сам си извършил жива проверка, ако нямаш резултат от официалната справка. Не обявявай името за свободно или гарантирано.
+- Поясни, че справката за фирма/наименование не е автоматична проверка за търговски марки или интернет домейни.
+- Върни registrationUpdate.activityDescription=null и registrationUpdate.companyName=null. Не приключвай стъпката вместо потребителя.
 `.trim();
 
 function instructionsFor(profile: AssistantProfile): string {
@@ -83,6 +95,8 @@ function registrationInstructions(input: ChatProviderInput): string | null {
       return activityDescriptionInstructions;
     case 5:
       return companyNameInstructions;
+    case 6:
+      return companyNameCheckInstructions;
     default:
       return null;
   }
@@ -413,10 +427,15 @@ export class OpenAIChatProvider implements ChatProvider {
       const retrievedResults = collectResults(response.output);
       const sources = verifiedSources(answer, retrievedResults, retrievedAt);
       const activityDescription = answer.registrationUpdate?.activityDescription?.trim() || null;
+      const companyName = answer.registrationUpdate?.companyName?.trim() || null;
       const hasActivityUpdate =
         input.assistantProfile === "registered_customer" &&
         input.context?.registrationProgress?.currentStep === 4 &&
         activityDescription !== null;
+      const hasCompanyNameUpdate =
+        input.assistantProfile === "registered_customer" &&
+        input.context?.registrationProgress?.currentStep === 5 &&
+        companyName !== null;
       const isCompanyNameGuidance =
         input.assistantProfile === "registered_customer" &&
         input.context?.registrationProgress?.currentStep === 5;
@@ -429,8 +448,13 @@ export class OpenAIChatProvider implements ChatProvider {
               asOf: answer.asOf,
               sources,
               warnings: answer.warnings,
-              ...(hasActivityUpdate
-                ? { registrationUpdate: { activityDescription } }
+              ...(hasActivityUpdate || hasCompanyNameUpdate
+                ? {
+                    registrationUpdate: {
+                      ...(hasActivityUpdate ? { activityDescription } : {}),
+                      ...(hasCompanyNameUpdate ? { companyName } : {}),
+                    },
+                  }
                 : {}),
             };
       const policy = profilePolicy(input.assistantProfile);

@@ -37,6 +37,8 @@ const registrationProgressSchema = z.object({
     .optional(),
   copiedCompanyDetails: z.record(z.string(), z.string().max(5_000)).optional(),
   activityDescription: z.string().max(5_000).nullable().optional(),
+  companyName: z.string().max(200).nullable().optional(),
+  companyNameCheck: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
 });
 
 const chatRequestSchema = z.object({

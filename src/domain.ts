@@ -31,11 +31,14 @@ export interface ChatContext {
     } | undefined;
     copiedCompanyDetails?: Record<string, string> | undefined;
     activityDescription?: string | null | undefined;
+    companyName?: string | null | undefined;
+    companyNameCheck?: Record<string, string | number | boolean | null> | undefined;
   };
 }
 
 export interface RegistrationUpdate {
   activityDescription?: string;
+  companyName?: string;
 }
 
 export interface ChatProviderInput {

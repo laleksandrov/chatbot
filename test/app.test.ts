@@ -270,6 +270,8 @@ describe("chatbot API", () => {
             },
             copiedCompanyDetails: { activity: "Консултантска дейност" },
             activityDescription: "Консултантска дейност",
+            companyName: null,
+            companyNameCheck: {},
           },
         },
       },
@@ -285,6 +287,8 @@ describe("chatbot API", () => {
       },
       copiedCompanyDetails: { activity: "Консултантска дейност" },
       activityDescription: "Консултантска дейност",
+      companyName: null,
+      companyNameCheck: {},
     });
     expect(response.json().registrationUpdate).toEqual({
       activityDescription: "Консултантска дейност и разработка на софтуер.",

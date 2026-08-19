@@ -25,7 +25,7 @@ describe("OpenAIChatProvider", () => {
         asOf: "2026-08-18",
         evidenceFileIds: [],
         warnings: [],
-        registrationUpdate: { activityDescription: null },
+        registrationUpdate: { activityDescription: null, companyName: null },
       },
       output: [],
     });
@@ -57,6 +57,68 @@ describe("OpenAIChatProvider", () => {
     });
   });
 
+  it("returns the selected company name as a structured update", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "answered",
+        answer: "Записах „Кодора“ за потвърждение.",
+        asOf: "2026-08-19",
+        evidenceFileIds: [],
+        warnings: [],
+        registrationUpdate: { activityDescription: null, companyName: "Кодора" },
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Избирам Кодора.",
+      context: {
+        registrationProgress: {
+          currentStep: 5,
+          completedSteps: [1, 2, 3, 4],
+          activityDescription: "Разработка на софтуер.",
+        },
+      },
+    });
+
+    expect(result.registrationUpdate).toEqual({ companyName: "Кодора" });
+  });
+
+  it("guides the official registry name check without pretending it performed one", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "needs_clarification",
+        answer: "Отворете официалната справка и потърсете „Кодора“ и близки изписвания.",
+        asOf: "2026-08-19",
+        evidenceFileIds: [],
+        warnings: [],
+        registrationUpdate: { activityDescription: null, companyName: null },
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Как да проверя името?",
+      context: {
+        registrationProgress: {
+          currentStep: 6,
+          completedSteps: [1, 2, 3, 4, 5],
+          companyName: "Кодора",
+        },
+      },
+    });
+
+    const request = parse.mock.calls[0]?.[0] as { instructions: string };
+    expect(request.instructions).toContain("Активна е стъпката „Проверка на името“");
+    expect(request.instructions).toContain("Не твърди, че сам си извършил жива проверка");
+  });
+
   it("guides the activity step and returns a structured full replacement without requiring evidence", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
@@ -67,6 +129,7 @@ describe("OpenAIChatProvider", () => {
         warnings: [],
         registrationUpdate: {
           activityDescription: "Консултантска дейност, разработка и поддръжка на софтуер.",
+          companyName: null,
         },
       },
       output: [],
