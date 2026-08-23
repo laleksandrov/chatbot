@@ -98,6 +98,8 @@ flowchart LR
 
 Практическото ръководство за трите режима — преди регистрация, регистриран потребител и клиент на счетоводната фирма — е в [`docs/integration/assistant-profiles.md`](docs/integration/assistant-profiles.md).
 
+Вътрешният режим за служителите на счетоводната фирма е `accounting_staff`. Той използва отделен EMS API клиент и не споделя инструкции, ключове, квоти или разговори с EasyStart.
+
 ### Health check
 
 ```http
@@ -244,6 +246,8 @@ Production provider използва `gpt-5.6-terra`, Responses API, structured 
 
 - документи с `accessLevel=global`;
 - документи с `accessLevel=tenant` и `tenantId`, равен на удостоверения API клиент.
+
+`public_pre_registration` не получава достъп до документи с `accessLevel=global`. Той търси единствено в публичните канонични документи на EasyStart. НАП, Държавен вестник, закони, институционални източници и редакционни материали могат да бъдат извличани само от `registered_customer`.
 
 Моделът връща `evidenceFileIds`, но приложението ги приема само ако същите file IDs присъстват в реалните `file_search_call.results`. Отговор със статус `answered`, който няма поне един проверен retrieval резултат, автоматично се променя на `insufficient_evidence`. Така моделът не може сам да измисли цитат или да посочи файл от друг tenant.
 

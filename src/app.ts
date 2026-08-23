@@ -39,6 +39,23 @@ const registrationProgressSchema = z.object({
   activityDescription: z.string().max(5_000).nullable().optional(),
   companyName: z.string().max(200).nullable().optional(),
   companyNameCheck: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  currentScreen: z
+    .object({
+      topic: z.string().min(1).max(100),
+      displayedMonthlyEstimate: z
+        .object({
+          currency: z.string().min(3).max(3),
+          total: z.number().finite().nonnegative().max(1_000_000),
+          selfInsuredContributions: z.number().finite().nonnegative().max(1_000_000),
+          advanceIncomeTax: z.number().finite().nonnegative().max(1_000_000),
+          accountingService: z.number().finite().nonnegative().max(1_000_000),
+          accountingProvider: z.string().min(1).max(200),
+          validFor: z.string().min(1).max(100),
+          assumptions: z.array(z.string().min(1).max(1_000)).max(20),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 const chatRequestSchema = z.object({

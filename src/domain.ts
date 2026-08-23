@@ -33,6 +33,19 @@ export interface ChatContext {
     activityDescription?: string | null | undefined;
     companyName?: string | null | undefined;
     companyNameCheck?: Record<string, string | number | boolean | null> | undefined;
+    currentScreen?: {
+      topic: string;
+      displayedMonthlyEstimate?: {
+        currency: string;
+        total: number;
+        selfInsuredContributions: number;
+        advanceIncomeTax: number;
+        accountingService: number;
+        accountingProvider: string;
+        validFor: string;
+        assumptions: string[];
+      } | undefined;
+    } | undefined;
   };
 }
 

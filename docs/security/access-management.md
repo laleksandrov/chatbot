@@ -12,7 +12,7 @@
 - `documents:global` — работа с глобалната база знания;
 - `documents:tenants` — работа от името на различни tenants.
 
-Всеки API клиент има отделен tenant, списък от права и разрешени assistant profiles. За EasyStart public и registered се създават различни клиенти и различни ключове. Активните режими са само `public_pre_registration` и `registered_customer`. Централният `knowledge-admin` ключ се пази локално в `.env.ingestion` и единствен той получава document правата.
+Всеки API клиент има отделен tenant, списък от права и разрешени assistant profiles. За EasyStart public и registered се създават различни клиенти и различни ключове. Активните режими са `public_pre_registration`, `registered_customer` и вътрешният `accounting_staff`. Централният `knowledge-admin` ключ се пази локално в `.env.ingestion` и единствен той получава document правата.
 
 Новият API ключ се показва само веднъж. В PostgreSQL се пази SHA-256 хеш и кратък prefix за разпознаване. Паролите на обикновените потребители се пазят със scrypt. Администраторските сесии са 12-часови, с HttpOnly/SameSite cookie и CSRF token.
 

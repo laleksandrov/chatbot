@@ -24,6 +24,7 @@ try {
     "006_environment_admin.sql",
     "007_two_easy_start_profiles.sql",
     "008_refresh_easy_start_public_metadata.sql",
+    "009_accounting_staff_profile.sql",
   ]) {
     if (!migrations.includes(expected)) throw new Error(`Missing database migration: ${expected}`);
   }

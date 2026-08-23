@@ -16,6 +16,68 @@ function buildProvider(parse: ReturnType<typeof vi.fn>): OpenAIChatProvider {
   });
 }
 
+const insuranceCostsContext = {
+  currentStep: 10,
+  completedSteps: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  currentScreen: {
+    topic: "insurance_costs",
+    displayedMonthlyEstimate: {
+      currency: "EUR",
+      total: 281.2,
+      selfInsuredContributions: 172.42,
+      advanceIncomeTax: 44.78,
+      accountingService: 64,
+      accountingProvider: "Леон.БГ",
+      validFor: "2026-08-01/2026-12-31",
+      assumptions: [
+        "Едно самоосигуряващо се лице на минимален осигурителен доход 620,20 евро.",
+        "Без осигуряване за общо заболяване и майчинство.",
+        "Лично възнаграждение 620,20 евро и 10% авансов данък след задължителните осигуровки.",
+        "Счетоводно обслужване от Леон.БГ за 64 евро.",
+      ],
+    },
+  },
+};
+
+function insurancePricingResponse(answer: string) {
+  return {
+    output_parsed: {
+      status: "answered",
+      answer,
+      asOf: "2026-08-19",
+      evidenceFileIds: ["file-platform-pricing"],
+      warnings: [],
+      registrationUpdate: { activityDescription: null, companyName: null },
+    },
+    output: [
+      {
+        id: "search-pricing",
+        type: "file_search_call",
+        status: "completed",
+        queries: ["EasyStart осигуряване 281,20 Леон.БГ 64"],
+        results: [
+          {
+            file_id: "file-platform-pricing",
+            filename: "easystart-prices-and-costs.md",
+            score: 0.99,
+            text: "281,20 евро общо, включително 64 евро счетоводство от Леон.БГ.",
+            attributes: {
+              title: "EasyStart — цени, външни разходи и калкулатори",
+              category: "platform_pricing",
+              sourceType: "professional",
+              sourceUrl: "https://v2.easystart.bg/",
+              accessLevel: "tenant",
+              tenantId: "easystart",
+              documentScope: "public",
+              retrievedAt: "2026-08-19T09:00:00Z",
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("OpenAIChatProvider", () => {
   it("brainstorms company names on step five without claiming registry availability", async () => {
     const parse = vi.fn().mockResolvedValue({
@@ -168,6 +230,172 @@ describe("OpenAIChatProvider", () => {
     });
   });
 
+  it("answers a deictic insurance-cost question from the supplied current screen", async () => {
+    const parse = vi
+      .fn()
+      .mockResolvedValue(
+        insurancePricingResponse(
+          "Да. Вече показаните 281,20 € могат да се променят според начина на участие и другите осигурителни основания.",
+        ),
+      );
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Има ли начини да намалим тази сума?",
+      context: { registrationProgress: insuranceCostsContext },
+    });
+
+    expect(result.status).toBe("answered");
+    expect(result.answer).toContain("281,20 €");
+    const request = parse.mock.calls[0]?.[0] as {
+      instructions: string;
+      input: string;
+      tools: Array<{ filters: unknown }>;
+    };
+    expect(request.instructions).toContain("изрази като „тази сума“");
+    expect(request.instructions).toContain("status=answered");
+    expect(request.tools[0]?.filters).toEqual({
+      type: "or",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            {
+              type: "and",
+              filters: [
+                { key: "accessLevel", type: "eq", value: "tenant" },
+                { key: "tenantId", type: "eq", value: "easystart" },
+                { key: "documentScope", type: "eq", value: "public" },
+              ],
+            },
+            { key: "category", type: "eq", value: "platform_pricing" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "global" },
+            { key: "sourceType", type: "in", value: ["institutional", "legislation"] },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("does not expose any global knowledge to the public profile", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Няма достатъчно информация.",
+        asOf: "2026-08-22",
+        evidenceFileIds: [],
+        warnings: [],
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "public_pre_registration",
+      message: "Къде мога да намеря повече информация?",
+    });
+
+    const request = parse.mock.calls[0]?.[0] as { tools: Array<{ filters: unknown }> };
+    expect(request.tools[0]?.filters).toEqual({
+      type: "and",
+      filters: [
+        { key: "accessLevel", type: "eq", value: "tenant" },
+        { key: "tenantId", type: "eq", value: "easystart" },
+        { key: "documentScope", type: "eq", value: "public" },
+      ],
+    });
+  });
+
+  it("answers the full question containing the displayed insurance breakdown", async () => {
+    const answer =
+      "Сумата включва 172,42 € осигуровки, 44,78 € авансов данък и 64 € счетоводство; възможностите зависят от конкретните осигурителни основания.";
+    const parse = vi.fn().mockResolvedValue(insurancePricingResponse(answer));
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message:
+        "На стъпка „Осигуряване“ виждам ориентировъчна месечна сума 281,20 €: 172,42 € осигуровки за СОЛ, 44,78 € авансов данък и 64 € счетоводство от Леон.БГ. Има ли законни начини да намалим тази сума и при какви условия?",
+      context: { registrationProgress: insuranceCostsContext },
+    });
+
+    expect(result).toMatchObject({ status: "answered", answer });
+  });
+
+  it("passes and recognizes the displayed total of 281.20 EUR", async () => {
+    const parse = vi
+      .fn()
+      .mockResolvedValue(insurancePricingResponse("Показаната обща месечна сума е 281,20 €."));
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Какво включва тази сума?",
+      context: { registrationProgress: insuranceCostsContext },
+    });
+
+    const request = parse.mock.calls[0]?.[0] as { input: string };
+    expect(JSON.parse(request.input).registrationProgress.currentScreen).toMatchObject({
+      topic: "insurance_costs",
+      displayedMonthlyEstimate: { currency: "EUR", total: 281.2 },
+    });
+  });
+
+  it("uses the 64 EUR Leon.BG accounting component from the current screen", async () => {
+    const parse = vi
+      .fn()
+      .mockResolvedValue(insurancePricingResponse("Счетоводният компонент е 64 € от Леон.БГ."));
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Колко от този разход е за счетоводство?",
+      context: { registrationProgress: insuranceCostsContext },
+    });
+
+    expect(result.answer).toContain("64 €");
+    expect(result.answer).toContain("Леон.БГ");
+    const request = parse.mock.calls[0]?.[0] as { input: string };
+    expect(JSON.parse(request.input).registrationProgress.currentScreen.displayedMonthlyEstimate).toMatchObject({
+      accountingService: 64,
+      accountingProvider: "Леон.БГ",
+    });
+  });
+
+  it("does not ask the registered user to repeat an amount already present in currentScreen", async () => {
+    const parse = vi
+      .fn()
+      .mockResolvedValue(
+        insurancePricingResponse(
+          "Ще използвам показаната сума 281,20 € и нейната разбивка. Намаление е възможно само ако действителните обстоятелства позволяват друго осигуряване.",
+        ),
+      );
+    const provider = buildProvider(parse);
+
+    const result = await provider.generate({
+      tenantId: "easystart",
+      assistantProfile: "registered_customer",
+      message: "Може ли да го намалим?",
+      context: { registrationProgress: insuranceCostsContext },
+    });
+
+    expect(result.status).toBe("answered");
+    expect(result.answer).not.toMatch(/(?:каква|колко)\s+(?:е|беше)\s+сумата|повторете\s+сумата/iu);
+    const request = parse.mock.calls[0]?.[0] as { instructions: string };
+    expect(request.instructions).toContain("Не искай потребителят да повтори общата сума");
+  });
+
   it("targets the EasyStart capabilities document for a public capability intent", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
@@ -294,7 +522,7 @@ describe("OpenAIChatProvider", () => {
     });
   });
 
-  it("adds only global official sources to the canonical pricing document for external costs", async () => {
+  it("uses only the canonical pricing document for public external costs", async () => {
     const parse = vi.fn().mockResolvedValue({
       output_parsed: {
         status: "insufficient_evidence",
@@ -315,29 +543,17 @@ describe("OpenAIChatProvider", () => {
 
     const request = parse.mock.calls[0]?.[0] as { tools: Array<{ filters: unknown }> };
     expect(request.tools[0]?.filters).toEqual({
-      type: "or",
+      type: "and",
       filters: [
         {
           type: "and",
           filters: [
-            {
-              type: "and",
-              filters: [
-                { key: "accessLevel", type: "eq", value: "tenant" },
-                { key: "tenantId", type: "eq", value: "easystart" },
-                { key: "documentScope", type: "eq", value: "public" },
-              ],
-            },
-            { key: "category", type: "eq", value: "platform_pricing" },
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "easystart" },
+            { key: "documentScope", type: "eq", value: "public" },
           ],
         },
-        {
-          type: "and",
-          filters: [
-            { key: "accessLevel", type: "eq", value: "global" },
-            { key: "sourceType", type: "in", value: ["institutional", "legislation"] },
-          ],
-        },
+        { key: "category", type: "eq", value: "platform_pricing" },
       ],
     });
   });
@@ -508,6 +724,55 @@ describe("OpenAIChatProvider", () => {
             { key: "accessLevel", type: "eq", value: "tenant" },
             { key: "tenantId", type: "eq", value: "easystart" },
             { key: "documentScope", type: "eq", value: "public" },
+          ],
+        },
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "tenant" },
+            { key: "tenantId", type: "eq", value: "ems" },
+            { key: "documentScope", type: "eq", value: "tenant" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("gives accounting staff global and EMS tenant knowledge without EasyStart documents", async () => {
+    const parse = vi.fn().mockResolvedValue({
+      output_parsed: {
+        status: "insufficient_evidence",
+        answer: "Нужни са допълнителни факти.",
+        asOf: "2026-08-23",
+        evidenceFileIds: [],
+        warnings: [],
+        registrationUpdate: { activityDescription: null, companyName: null },
+      },
+      output: [],
+    });
+    const provider = buildProvider(parse);
+
+    await provider.generate({
+      tenantId: "ems",
+      assistantProfile: "accounting_staff",
+      message: "Как се третира услуга към клиент в Германия?",
+      context: { jurisdiction: "BG", asOf: "2026-08-23" },
+    });
+
+    const request = parse.mock.calls[0]?.[0] as {
+      instructions: string;
+      tools: Array<{ filters: unknown }>;
+    };
+    expect(request.instructions).toContain("вътрешен професионален режим");
+    expect(request.instructions).toContain("не насочвай служителя към регистрация в EasyStart");
+    expect(request.tools[0]?.filters).toEqual({
+      type: "or",
+      filters: [
+        {
+          type: "and",
+          filters: [
+            { key: "accessLevel", type: "eq", value: "global" },
+            { key: "sourceType", type: "ne", value: "internal" },
           ],
         },
         {

@@ -52,6 +52,7 @@ describe("chatbot API", () => {
     allowedProfiles: AppConfig["apiClients"][number]["allowedProfiles"] = [
       "public_pre_registration",
       "registered_customer",
+      "accounting_staff",
     ],
   ) {
     const config: AppConfig = {
@@ -296,6 +297,68 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("passes the displayed insurance estimate from the current EasyStart screen", async () => {
+    const calls: Parameters<ChatProvider["generate"]>[0][] = [];
+    const provider: ChatProvider = {
+      async generate(input) {
+        calls.push(input);
+        return {
+          status: "answered",
+          answer: "Използвам показаната сума 281,20 €.",
+          asOf: "2026-08-19",
+          sources: [],
+          warnings: [],
+        };
+      },
+    };
+    const app = await buildApp(provider);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        channel: "easystart-registration",
+        externalUserId: "easystart-user-1",
+        message: "Има ли начини да намалим тази сума?",
+        context: {
+          registrationProgress: {
+            currentStep: 10,
+            completedSteps: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+            currentScreen: {
+              topic: "insurance_costs",
+              displayedMonthlyEstimate: {
+                currency: "EUR",
+                total: 281.2,
+                selfInsuredContributions: 172.42,
+                advanceIncomeTax: 44.78,
+                accountingService: 64,
+                accountingProvider: "Леон.БГ",
+                validFor: "2026-08-01/2026-12-31",
+                assumptions: ["Едно самоосигуряващо се лице."],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]?.context?.registrationProgress?.currentScreen).toEqual({
+      topic: "insurance_costs",
+      displayedMonthlyEstimate: {
+        currency: "EUR",
+        total: 281.2,
+        selfInsuredContributions: 172.42,
+        advanceIncomeTax: 44.78,
+        accountingService: 64,
+        accountingProvider: "Леон.БГ",
+        validFor: "2026-08-01/2026-12-31",
+        assumptions: ["Едно самоосигуряващо се лице."],
+      },
+    });
+    await app.close();
+  });
+
   it("allows only the central knowledge admin to upload and read another tenant's document", async () => {
     const app = await buildApp();
     const multipart = multipartPayload(
@@ -428,6 +491,36 @@ describe("chatbot API", () => {
     });
 
     expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("serves the dedicated accounting-staff profile with its own quota and retention", async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat",
+      headers: { authorization: `Bearer ${apiKey}` },
+      payload: {
+        assistantProfile: "accounting_staff",
+        channel: "ems-accounting-web",
+        externalUserId: "staff-user-1",
+        message: "Как се третира услуга към клиент в Германия?",
+        context: { jurisdiction: "BG", asOf: "2026-08-23" },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      assistantProfile: "accounting_staff",
+      capabilities: { humanEscalation: false, organizationDocuments: false },
+      quota: { limit: 1_000, remaining: 999 },
+    });
+    expect(conversations.exchanges[0]).toMatchObject({
+      tenantId: "ems",
+      assistantProfile: "accounting_staff",
+      externalUserId: "staff-user-1",
+      retentionDays: 365,
+    });
     await app.close();
   });
 

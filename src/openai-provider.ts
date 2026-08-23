@@ -85,6 +85,17 @@ const companyNameCheckInstructions = `
 - Върни registrationUpdate.activityDescription=null и registrationUpdate.companyName=null. Не приключвай стъпката вместо потребителя.
 `.trim();
 
+const insuranceCostsInstructions = `
+Активен е екранът „Осигуряване“ в EasyStart и registrationProgress.currentScreen.topic е insurance_costs.
+- registrationProgress.currentScreen.displayedMonthlyEstimate е вече показаната на потребителя месечна калкулация. Използвай я като контекст за изрази като „тази сума“, „този разход“, „разбивката“ и „може ли да го намалим“.
+- Не искай потребителят да повтори общата сума или разбивката, когато полетата total, selfInsuredContributions, advanceIncomeTax, accountingService, accountingProvider, validFor и assumptions са налични.
+- Назовавай точно общата сума и компонентите от контекста. Не преизчислявай и не заменяй стойностите с други стойности.
+- За цената и условията на счетоводната услуга използвай каноничния документ platform_pricing. За приложимите осигурителни и данъчни правила използвай извлечените официални източници.
+- При въпрос за законно намаляване обясни кои допускания могат да се променят според действителното участие и другите осигурителни основания. Не обещавай по-ниска сума без нужните факти.
+- Ако въпросът е покрит от displayedMonthlyEstimate и приложимия каноничен документ, върни status=answered, а не needs_clarification или insufficient_evidence. Уточняващ въпрос е допустим само за следваща персонализирана калкулация, не за разпознаване на вече показаната сума.
+- Върни registrationUpdate.activityDescription=null и registrationUpdate.companyName=null.
+`.trim();
+
 function instructionsFor(profile: AssistantProfile): string {
   const policy = profilePolicy(profile);
   return [
@@ -99,6 +110,10 @@ function instructionsFor(profile: AssistantProfile): string {
 
 function registrationInstructions(input: ChatProviderInput): string | null {
   if (input.assistantProfile !== "registered_customer") return null;
+
+  if (input.context?.registrationProgress?.currentScreen?.topic === "insurance_costs") {
+    return insuranceCostsInstructions;
+  }
 
   switch (input.context?.registrationProgress?.currentStep) {
     case 4:
@@ -163,15 +178,11 @@ function publicIntentFilter(intent: PublicIntentDecision): FileSearchFilter | nu
     case "platform_capabilities":
       return capabilities;
     case "platform_pricing":
-      return intent.includeOfficialSources
-        ? { type: "or", filters: [pricing, globalOfficialKnowledgeFilter] }
-        : pricing;
+      return pricing;
     case "platform_mixed":
-      return intent.includeOfficialSources
-        ? { type: "or", filters: [mixed, globalOfficialKnowledgeFilter] }
-        : mixed;
+      return mixed;
     case "external_registration_costs":
-      return { type: "or", filters: [pricing, globalOfficialKnowledgeFilter] };
+      return pricing;
     case "restricted":
     case "unknown":
       return null;
@@ -199,6 +210,16 @@ function publicIntentInstructions(intent: PublicIntentDecision): string {
 function retrievalFilter(input: ChatProviderInput, publicIntent?: PublicIntentDecision): FileSearchFilter {
   const policy = profilePolicy(input.assistantProfile);
 
+  if (
+    input.assistantProfile === "registered_customer" &&
+    input.context?.registrationProgress?.currentScreen?.topic === "insurance_costs"
+  ) {
+    return {
+      type: "or",
+      filters: [canonicalEasyStartFilter(["platform_pricing"]), globalOfficialKnowledgeFilter],
+    };
+  }
+
   const publicTenantKnowledgeFilter: FileSearchFilter = {
     type: "and",
     filters: [
@@ -212,14 +233,14 @@ function retrievalFilter(input: ChatProviderInput, publicIntent?: PublicIntentDe
     const intentFilter = publicIntentFilter(publicIntent);
     if (intentFilter) return intentFilter;
     if (publicIntent.group === "unknown") {
-      return { type: "or", filters: [globalKnowledgeFilter, easyStartPublicKnowledgeFilter] };
+      return easyStartPublicKnowledgeFilter;
     }
   }
 
   if (!policy.allowsTenantDocuments && !policy.allowsOrganizationDocuments) {
     return policy.allowsPublicTenantDocuments
-      ? { type: "or", filters: [globalKnowledgeFilter, publicTenantKnowledgeFilter] }
-      : globalKnowledgeFilter;
+      ? publicTenantKnowledgeFilter
+      : easyStartPublicKnowledgeFilter;
   }
 
   const tenantKnowledgeFilter: FileSearchFilter = {
