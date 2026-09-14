@@ -120,6 +120,15 @@ export class InMemoryDocumentRepository implements DocumentWorkRepository {
     this.documents.set(document.id, document);
   }
 
+  async findBySha256(tenantId: string, sha256: string): Promise<DocumentRecord | null> {
+    return (
+      [...this.documents.values()].find(
+        (document) =>
+          document.tenantId === tenantId && document.sha256 === sha256 && document.status !== "archived",
+      ) ?? null
+    );
+  }
+
   async findById(
     tenantId: string,
     id: string,
@@ -443,6 +452,16 @@ export class PostgresDocumentRepository implements DocumentWorkRepository {
     return result.rows[0] ? mapDocument(result.rows[0]) : null;
   }
 
+  async findBySha256(tenantId: string, sha256: string): Promise<DocumentRecord | null> {
+    const result = await this.pool.query<DocumentRow>(
+      `SELECT * FROM documents
+       WHERE tenant_id = $1 AND sha256 = $2 AND status <> 'archived'
+       LIMIT 1`,
+      [tenantId, sha256],
+    );
+    return result.rows[0] ? mapDocument(result.rows[0]) : null;
+  }
+
   async claimNext(input: {
     workerId: string;
     leaseSeconds: number;
@@ -584,6 +603,10 @@ export class DocumentIngestionService {
     content: Buffer;
   }): Promise<DocumentRecord> {
     assertAllowedMimeType(input.mimeType);
+    const incomingSha256 = createHash("sha256").update(input.content).digest("hex");
+    const existing = await this.repository.findBySha256(input.tenantId, incomingSha256);
+    if (existing) return existing;
+
     const id = randomUUID();
     const stored = await this.rawStorage.save({
       tenantId: input.tenantId,

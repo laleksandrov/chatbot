@@ -148,6 +148,7 @@ export interface DocumentRecord {
 
 export interface DocumentRepository {
   save(document: DocumentRecord): Promise<void>;
+  findBySha256(tenantId: string, sha256: string): Promise<DocumentRecord | null>;
   findById(
     tenantId: string,
     id: string,

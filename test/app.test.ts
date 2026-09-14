@@ -233,6 +233,37 @@ describe("chatbot API", () => {
     await app.close();
   });
 
+  it("returns the existing document when the same content is uploaded again", async () => {
+    const app = await buildApp();
+    const metadata = {
+      tenantId: "ems",
+      title: "Повторен документ",
+      category: "accounting",
+      sourceType: "internal",
+      accessLevel: "tenant",
+      jurisdiction: "BG",
+    };
+    const firstPayload = multipartPayload(metadata, "Едно и също съдържание");
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/admin/documents",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": firstPayload.contentType },
+      payload: firstPayload.body,
+    });
+    const secondPayload = multipartPayload(metadata, "Едно и също съдържание");
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/admin/documents",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": secondPayload.contentType },
+      payload: secondPayload.body,
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
+    expect(second.json().documentId).toBe(first.json().documentId);
+    await app.close();
+  });
+
   it("passes registration progress to the provider and returns structured registration updates", async () => {
     const calls: Parameters<ChatProvider["generate"]>[0][] = [];
     const provider: ChatProvider = {
