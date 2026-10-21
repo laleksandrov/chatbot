@@ -144,9 +144,12 @@ export interface DocumentRecord {
   indexedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  supersededBy?: string;
 }
 
 export interface DocumentRepository {
+  replacementReady(): Promise<boolean>;
+  replaceReady(input: DocumentReplacement): Promise<void>;
   save(document: DocumentRecord): Promise<void>;
   findBySha256(tenantId: string, sha256: string): Promise<DocumentRecord | null>;
   findById(
@@ -158,6 +161,14 @@ export interface DocumentRepository {
   retryFailed(id: string): Promise<DocumentRecord | null>;
   updateStatus(id: string, status: DocumentStatus, error?: string): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface DocumentReplacement {
+  oldId: string;
+  newId: string;
+  oldSha256: string;
+  newSha256: string;
+  detach(document: DocumentRecord): Promise<void>;
 }
 
 export interface DocumentIndexResult {

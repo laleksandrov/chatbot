@@ -25,6 +25,7 @@ try {
     "007_two_easy_start_profiles.sql",
     "008_refresh_easy_start_public_metadata.sql",
     "009_accounting_staff_profile.sql",
+    "010_document_replacement.sql",
   ]) {
     if (!migrations.includes(expected)) throw new Error(`Missing database migration: ${expected}`);
   }
@@ -41,6 +42,7 @@ try {
     "vector_store_file_id",
     "indexed_at",
     "organization_id",
+    "superseded_by",
   ]) {
     if (!columnNames.has(expected)) throw new Error(`Missing documents column: ${expected}`);
   }

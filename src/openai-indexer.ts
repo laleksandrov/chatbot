@@ -77,6 +77,20 @@ export class OpenAIDocumentIndexer implements DocumentIndexer {
     this.now = options.now ?? (() => new Date());
   }
 
+  async detach(document: DocumentRecord): Promise<void> {
+    if (!document.openAiFileId || document.vectorStoreId !== this.options.vectorStoreId) {
+      throw new Error("Index identity does not match configured vector store");
+    }
+    try {
+      const result = await this.client.vectorStores.files.delete(document.openAiFileId, {
+        vector_store_id: this.options.vectorStoreId,
+      });
+      if (!result.deleted) throw new Error("Index detach was not confirmed");
+    } catch (error) {
+      if (errorStatus(error) !== 404) throw error;
+    }
+  }
+
   async index(input: Parameters<DocumentIndexer["index"]>[0]) {
     let openAiFileId = input.document.openAiFileId;
     if (!openAiFileId) {

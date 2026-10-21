@@ -18,6 +18,7 @@ import {
   type ConversationStore,
   type DocumentProcessor,
   type DocumentRepository,
+  type DocumentRecord,
   type RawDocumentStorage,
 } from "./domain.js";
 import { DocumentIngestionService, documentMetadataSchema } from "./documents.js";
@@ -85,6 +86,7 @@ export interface AppDependencies {
   documentRepository: DocumentRepository;
   rawDocumentStorage: RawDocumentStorage;
   documentProcessor: DocumentProcessor;
+  detachDocument?: (document: DocumentRecord) => Promise<void>;
   readinessCheck?: () => Promise<void>;
   apiClientAuthenticator?: ApiClientAuthenticator;
   adminRepository?: AccessAdminRepository;
@@ -349,6 +351,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     return reply.status(202).send({
       documentId: document.id,
       status: document.status,
+      supersededBy: document.supersededBy ?? null,
       sha256: document.sha256,
       createdAt: document.createdAt.toISOString(),
     });
@@ -390,9 +393,37 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
       attemptCount: document.attemptCount,
       nextAttemptAt: document.nextAttemptAt?.toISOString() ?? null,
       indexedAt: document.indexedAt?.toISOString() ?? null,
+      supersededBy: document.supersededBy ?? null,
       createdAt: document.createdAt.toISOString(),
       updatedAt: document.updatedAt.toISOString(),
     });
+  });
+
+  app.get("/v1/admin/document-replacement-capabilities", async (request, reply) => {
+    requireRole(request, "documents:write");
+    return reply.send({ version: 1, indexDetachmentConfigured: Boolean(dependencies.detachDocument),
+      migrationReady: await dependencies.documentRepository.replacementReady() });
+  });
+
+  app.post("/v1/admin/documents/:id/replace", async (request, reply) => {
+    const auth = requireRole(request, "documents:write");
+    const { id } = documentParamsSchema.parse(request.params);
+    const body = z.object({ replacementId: z.uuid(), oldSha256: z.string().regex(/^[a-f0-9]{64}$/), newSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(request.body);
+    for (const targetId of [id, body.replacementId]) {
+      const document = await dependencies.documentRepository.findById(auth.tenantId, targetId, auth.roles.has("documents:global"), auth.roles.has("documents:tenants"));
+      if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
+      if ((document.tenantId !== auth.tenantId && !auth.roles.has("documents:tenants")) ||
+          (document.accessLevel === "global" && !auth.roles.has("documents:global"))) {
+        throw new HttpError(403, "REPLACEMENT_FORBIDDEN", "No write permission for this document");
+      }
+    }
+    if (!dependencies.detachDocument) throw new HttpError(503, "REPLACEMENT_UNAVAILABLE", "Index retirement is not configured");
+    if (!await dependencies.documentRepository.replacementReady()) throw new HttpError(503, "REPLACEMENT_MIGRATION_REQUIRED", "Replacement migration is not applied");
+    await dependencies.documentRepository.replaceReady({
+      oldId: id, newId: body.replacementId, oldSha256: body.oldSha256, newSha256: body.newSha256,
+      detach: dependencies.detachDocument,
+    });
+    return reply.send({ documentId: id, status: "archived", supersededBy: body.replacementId });
   });
 
   app.post("/v1/admin/documents/:id/retry", async (request, reply) => {

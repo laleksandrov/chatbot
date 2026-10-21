@@ -12,9 +12,11 @@ import type {
   DocumentIndexResult,
   DocumentStatus,
   DocumentWorkRepository,
+  DocumentReplacement,
   RawDocumentStorage,
   StoredRawDocument,
 } from "./domain.js";
+import { validateReplacement } from "./document-replacement.js";
 
 export const documentMetadataSchema = z
   .object({
@@ -115,6 +117,23 @@ export class LocalRawDocumentStorage implements RawDocumentStorage {
 
 export class InMemoryDocumentRepository implements DocumentWorkRepository {
   readonly documents = new Map<string, DocumentRecord>();
+  private replacementTail = Promise.resolve();
+
+  async replacementReady(): Promise<boolean> { return true; }
+
+  async replaceReady(input: DocumentReplacement): Promise<void> {
+    const previous = this.replacementTail;
+    let release!: () => void;
+    this.replacementTail = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    try {
+      const old = this.documents.get(input.oldId);
+      const next = this.documents.get(input.newId);
+      if (!validateReplacement(old, next, input)) return;
+      await input.detach(old!);
+      this.documents.set(old!.id, { ...old!, status: "archived", supersededBy: input.newId, updatedAt: new Date() });
+    } finally { release(); }
+  }
 
   async save(document: DocumentRecord): Promise<void> {
     this.documents.set(document.id, document);
@@ -288,6 +307,7 @@ export class InMemoryDocumentRepository implements DocumentWorkRepository {
 }
 
 interface DocumentRow {
+  superseded_by: string | null;
   id: string;
   tenant_id: string;
   title: string;
@@ -358,11 +378,46 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     indexedAt: row.indexed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.superseded_by ? { supersededBy: row.superseded_by } : {}),
   };
 }
 
 export class PostgresDocumentRepository implements DocumentWorkRepository {
   constructor(private readonly pool: Pool) {}
+
+  async replacementReady(): Promise<boolean> {
+    const result = await this.pool.query<{ ready: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'documents' AND column_name = 'superseded_by') AS ready",
+    );
+    return result.rows[0]?.ready === true;
+  }
+
+  async replaceReady(input: DocumentReplacement): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<DocumentRow>(
+        "SELECT * FROM documents WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+        [[input.oldId, input.newId]],
+      );
+      const rows = result.rows.map(mapDocument);
+      const old = rows.find(row => row.id === input.oldId);
+      const next = rows.find(row => row.id === input.newId);
+      if (validateReplacement(old, next, input)) {
+        // If the external detach succeeded but COMMIT is interrupted, retrying
+        // is safe: the index adapter treats an already detached file as success.
+        await input.detach(old!);
+        await client.query(
+          "UPDATE documents SET status = 'archived', superseded_by = $2, updated_at = now() WHERE id = $1",
+          [input.oldId, input.newId],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
 
   async save(document: DocumentRecord): Promise<void> {
     await this.pool.query(

@@ -20,6 +20,7 @@ import {
   PostgresDocumentRepository,
 } from "./documents.js";
 import { OpenAIChatProvider } from "./openai-provider.js";
+import { OpenAIDocumentIndexer } from "./openai-indexer.js";
 import { InMemoryChatQuotaStore, PostgresChatQuotaStore } from "./quotas.js";
 
 const config = loadConfig();
@@ -70,6 +71,12 @@ const app = await createApp({
   documentRepository,
   rawDocumentStorage: new LocalRawDocumentStorage(resolve(config.dataDir)),
   documentProcessor: new PendingDocumentProcessor(),
+  ...(config.aiProvider === "openai" && config.openAiApiKey && config.openAiVectorStoreId ? {
+    detachDocument: (document: import("./domain.js").DocumentRecord) => new OpenAIDocumentIndexer({
+      apiKey: config.openAiApiKey!, vectorStoreId: config.openAiVectorStoreId!,
+      pollIntervalMs: config.openAiVectorPollIntervalMs, pollTimeoutMs: config.openAiVectorPollTimeoutMs,
+    }).detach(document),
+  } : {}),
   apiClientAuthenticator,
   ...(accessRepository ? { adminRepository: accessRepository } : {}),
   ...(pool ? { readinessCheck: async () => { await pool.query("SELECT 1"); } } : {}),

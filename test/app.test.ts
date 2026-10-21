@@ -54,6 +54,7 @@ describe("chatbot API", () => {
       "registered_customer",
       "accounting_staff",
     ],
+    detachDocument?: (document: import("../src/domain.js").DocumentRecord) => Promise<void>,
   ) {
     const config: AppConfig = {
       nodeEnv: "test",
@@ -101,6 +102,7 @@ describe("chatbot API", () => {
       documentRepository: documents,
       rawDocumentStorage: new LocalRawDocumentStorage(dataDir),
       documentProcessor: new PendingDocumentProcessor(),
+      ...(detachDocument ? { detachDocument } : {}),
     });
   }
 
@@ -109,6 +111,40 @@ describe("chatbot API", () => {
     const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: "ok" });
+    await app.close();
+  });
+
+  it("replaces only ready same-scope versions with write authority and supports retry", async () => {
+    const detached: string[] = [];
+    const app = await buildApp(undefined, undefined, async document => { detached.push(document.id); });
+    const metadata = { tenantId: "knowledge-admin", title: "GFO", category: "kik-info", publisher: "КиК.БГ",
+      sourceType: "professional", accessLevel: "global", sourceUrl: "https://kik-info.com/a" };
+    const ids: string[] = [];
+    for (const content of ["Old", "New"]) {
+      const payload = multipartPayload(metadata, content);
+      const response = await app.inject({ method: "POST", url: "/v1/admin/documents",
+        headers: { authorization: `Bearer ${knowledgeAdminKey}`, "content-type": payload.contentType }, payload: payload.body });
+      expect(response.statusCode).toBe(202);
+      ids.push(response.json().documentId);
+    }
+    const old = documents.documents.get(ids[0]!)!;
+    const next = documents.documents.get(ids[1]!)!;
+    await documents.save({ ...old, status: "ready", indexedAt: new Date(), openAiFileId: "file_old", vectorStoreId: "vs_test" });
+    const body = { replacementId: next.id, oldSha256: old.sha256, newSha256: next.sha256 };
+    const route = `/v1/admin/documents/${old.id}/replace`;
+    expect((await app.inject({ method: "POST", url: route, payload: body })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: route, headers: { authorization: `Bearer ${apiKey}` }, payload: body })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: route, headers: { authorization: `Bearer ${knowledgeAdminKey}` }, payload: body })).statusCode).toBe(409);
+    expect(detached).toEqual([]);
+    await documents.save({ ...next, status: "ready", indexedAt: new Date(), openAiFileId: "file_new", vectorStoreId: "vs_test" });
+    for (let retry = 0; retry < 2; retry++) {
+      const response = await app.inject({ method: "POST", url: route, headers: { authorization: `Bearer ${knowledgeAdminKey}` }, payload: body });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: "archived", supersededBy: next.id });
+    }
+    expect(detached).toEqual([old.id]);
+    const archived = await app.inject({ method: "GET", url: `/v1/admin/documents/${old.id}`, headers: { authorization: `Bearer ${knowledgeAdminKey}` } });
+    expect(archived.json().supersededBy).toBe(next.id);
     await app.close();
   });
 
